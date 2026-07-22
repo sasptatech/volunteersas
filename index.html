@@ -76,7 +76,7 @@ function renderJoinStep() {
   if (joinStep === 1) {
     body = `
       <div class="form-row"><label>Display name</label><input id="jName" value="${esc(d.displayName)}" placeholder="How others will see you"></div>
-      <div class="form-row"><label>Phone number (optional, admins only)</label><input id="jPhone" value="${esc(d.phone)}" placeholder="+65 9123 4567"></div>
+      <div class="form-row"><label>Phone number (optional, WhatsApp number)</label><input id="jPhone" value="${esc(d.phone)}" placeholder="+65 9123 4567"></div>
       <div class="form-row"><label>Divisions that apply to you</label>
         <div class="role-grid">${ECOSYSTEMS.map(e=>`<button type="button" class="role-opt ${d.divisions.includes(e.id)?'active':''}" data-div="${e.id}">${e.icon} ${e.name}</button>`).join('')}</div>
       </div>
@@ -124,6 +124,7 @@ function renderJoinStep() {
       try {
         await completeProfile(d);
         toast('Welcome to VolunteerSAS!');
+        renderApp(getProfile());
       } catch (e) { toast('Could not save profile: ' + e.message); }
     };
   }
