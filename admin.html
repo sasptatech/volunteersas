@@ -21,6 +21,7 @@ import {
 } from "./js/firebase-init.js";
 import { toast, showOverlay, closeOverlay, esc, renderHeader } from "./js/common.js";
 import { rteHtml, rteValue } from "./js/rte.js";
+import { MAPPEDIN_LOCATIONS, findMappedinLocation } from "./js/mappedin-locations.js";
 
 const root = document.getElementById('root');
 let tab = 'events';
@@ -88,13 +89,9 @@ function renderEventsTab() {
 function renderHoursTab() {
   const rows = hours.slice().sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
   return `<div class="card" style="padding:6px 16px;overflow-x:auto">
-    <table class="datatable"><thead><tr><th>Volunteer</th><th>Activity</th><th>Date</th><th>Hours</th><th>Status</th></tr></thead>
-    <tbody>${rows.map(h => {
-      const col = h.status === 'Verified' ? '#0E8A6D' : h.status === 'Pending' ? '#C9922B' : '#B01C2E';
-      return `<tr><td>${esc(h.volunteer)}</td><td>${esc(h.event)}</td><td>${esc(h.date)}</td><td>${h.hrs}</td>
-        <td><span class="status-pill" style="background:${col}22;color:${col}">${esc(h.status)}</span>
-        ${h.status !== 'Verified' ? `<button class="small-link" style="margin-left:6px" onclick="window.__verifyHours('${h.id}')">Verify</button>` : ''}</td></tr>`;
-    }).join('') || `<tr><td colspan="5" style="color:var(--ink-soft)">No hours logged yet.</td></tr>`}</tbody></table>
+    <table class="datatable"><thead><tr><th>Volunteer</th><th>Activity</th><th>Date</th><th>Hours</th><th></th></tr></thead>
+    <tbody>${rows.map(h => `<tr><td>${esc(h.volunteer)}</td><td>${esc(h.event)}</td><td>${esc(h.date)}</td><td>${h.hrs}</td>
+        <td><button class="small-link" style="color:var(--red)" onclick="window.__removeHours('${h.id}')">Remove (no-show)</button></td></tr>`).join('') || `<tr><td colspan="5" style="color:var(--ink-soft)">No hours logged yet.</td></tr>`}</tbody></table>
   </div>`;
 }
 
@@ -195,6 +192,10 @@ function wireTabHandlers() {
       <div class="form-row"><label>Date</label><input type="date" id="neDate"></div>
       <div class="form-row"><label>Time</label><input id="neTime" placeholder="e.g. 9:00 AM"></div>
       <div class="form-row"><label>Location</label><input id="neLoc"></div>
+      <div class="form-row"><label>SAS Mappedin location (optional — type to search, makes the location name a clickable map link)</label>
+        <input list="mappedinDatalist" id="neMappedin" placeholder="Start typing a room/location name…">
+        <datalist id="mappedinDatalist">${MAPPEDIN_LOCATIONS.map(l => `<option value="${esc(l.name)}">`).join('')}</datalist>
+      </div>
       <div class="form-row"><label>Event type</label>
         <select id="neType">
           <option value="standard">Standard (simple RSVP)</option>
@@ -232,9 +233,12 @@ function wireTabHandlers() {
       const saveBtn = document.getElementById('neSave');
       saveBtn.disabled = true; saveBtn.textContent = 'Creating…';
       try {
+        const mappedinTyped = document.getElementById('neMappedin').value.trim();
+        const mappedinMatch = MAPPEDIN_LOCATIONS.find(l => l.name === mappedinTyped);
         const ref = await addDoc(collection(db, 'events'), {
           title, date, time: document.getElementById('neTime').value.trim(),
           location: document.getElementById('neLoc').value.trim(),
+          mappedinLocationId: mappedinMatch ? mappedinMatch.id : null,
           description, type, ...extra,
           divisions, adminUids: [getProfile().uid], attachments: [], photos: [], createdAt: serverTimestamp(),
         });
@@ -284,8 +288,10 @@ function wireTabHandlers() {
     } catch (e) { toast('Could not seed: ' + e.message); }
   };
 
-  window.__verifyHours = async (id) => {
-    try { await updateDoc(doc(db, 'hours', id), { status: 'Verified' }); } catch (e) { toast('Could not verify: ' + e.message); }
+  window.__removeHours = async (id) => {
+    if (!confirm('Remove this hours entry? Use this if the volunteer didn\'t actually show up.')) return;
+    try { await deleteDoc(doc(db, 'hours', id)); await logAudit('Removed hours entry (no-show)', id); toast('Removed.'); }
+    catch (e) { toast('Could not remove: ' + e.message); }
   };
 
   window.__toggleFlag = async (uid, field, value) => {
