@@ -1,26 +1,27 @@
 # Pending Changes — batch these into GitHub together
 
-## Ready to upload now — full set of new/changed files
+## Ready to upload now
 
-**New files:**
-- event.html
-- cafe.html
-- schedule.html
-- profile.html
-- admin.html
-- js/cafe-dates.js
-- js/chat.js
+**New file:**
+- js/calendar.js — "Add to calendar" (Google Calendar link + .ics download)
 
 **Changed files:**
-- index.html (phone label fix + join-button bug fix, from before)
-- js/firebase-init.js (added Firebase Storage support)
-- README.md (setup instructions updated)
+- cafe.html — calendar export shown after signing up for a shift
+- event.html — calendar export shown on the event page
+- schedule.html — calendar export button on every item in My Schedule
 
-## Before this is testable end-to-end, two setup steps are required
-(full instructions in README.md)
-1. Add Firebase **Storage** security rules (separate system from Firestore rules — currently blocks all uploads)
-2. Add a Firestore **TTL policy** on `chatMessages.expiresAt` so chats actually auto-delete after 7 days
+## Still investigating
+- Cafe shift not showing on My Schedule earlier — no bug found in the code on review;
+  most likely cause is testing before schedule.html was uploaded. Please retest and
+  report back if it still doesn't show up (check the `cafeSignups` doc's `uid` field
+  in Firestore console if so).
 
 ## Still outstanding (tracked, not urgent)
+- TTL policy on chatMessages.expiresAt — blocked, needs one real chat message sent
+  first so the collection exists, then set up via:
+  console.cloud.google.com/firestore/databases/-default-/ttl?project=sasptavolunteer
 - reCAPTCHA v3 site key still a placeholder (agreed: later)
 - Real email sending not wired up yet (agreed: tomorrow/later)
+
+## Done
+- ~~Firebase Storage rules~~ ✅ published

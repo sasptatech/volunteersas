@@ -18,6 +18,7 @@ import { watchAuth, getProfile } from "./js/auth.js";
 import { db, collection, query, where, onSnapshot, doc, getDoc, deleteDoc } from "./js/firebase-init.js";
 import { SHIFT_TYPES, fmtDayLabel } from "./js/cafe-dates.js";
 import { toast, renderHeader, esc } from "./js/common.js";
+import { renderAddToCalendar } from "./js/calendar.js";
 
 const root = document.getElementById('root');
 let myEventSignups = [], myCafeSignups = [], eventCache = {};
@@ -53,24 +54,36 @@ function render() {
     ...myEventSignups.filter(s => eventCache[s.eventId]).map(s => ({
       type: 'event', date: eventCache[s.eventId].date, id: s.id,
       label: eventCache[s.eventId].title, sub: eventCache[s.eventId].location,
-      href: `event.html?id=${s.eventId}`,
+      href: `event.html?id=${s.eventId}`, startTime: eventCache[s.eventId].time, location: eventCache[s.eventId].location,
+      description: eventCache[s.eventId].description,
     })),
-    ...myCafeSignups.map(s => ({
-      type: 'cafe', date: s.date, id: s.id,
-      label: `PTA Cafe — ${(SHIFT_TYPES.find(t => t.id === s.shift) || {}).label || s.shift}`,
-      sub: fmtDayLabel(s.date), href: 'cafe.html',
-    })),
+    ...myCafeSignups.map(s => {
+      const st = SHIFT_TYPES.find(t => t.id === s.shift) || {};
+      return {
+        type: 'cafe', date: s.date, id: s.id,
+        label: `PTA Cafe — ${st.label || s.shift}`,
+        sub: fmtDayLabel(s.date), href: 'cafe.html',
+        startTime: st.label ? st.label.split('–')[0].trim() : '9:00 AM', durationHrs: st.hrs,
+        location: 'PTA Cafe, SAS', description: 'PTA Cafe volunteer shift.',
+      };
+    }),
   ].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
   if (!items.length) { list.innerHTML = `<p style="color:var(--ink-soft)">Nothing on your schedule yet — visit Discover or PTA Cafe to sign up.</p>`; return; }
 
-  list.innerHTML = `<div class="grid">${items.map(it => `
+  list.innerHTML = `<div class="grid">${items.map((it, i) => `
     <div class="card" style="padding:14px">
       <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--ink-soft)">${it.type === 'cafe' ? '☕ PTA Cafe' : '🔍 Event'}</div>
       <a href="${it.href}" style="display:block;margin:4px 0"><strong>${esc(it.label)}</strong></a>
       <div style="font-size:12.5px;color:var(--ink-soft)">${esc(it.sub || '')}</div>
+      <div id="addCal-${i}"></div>
       <button class="small-link" style="color:var(--red);margin-top:8px" onclick="window.__cancelItem('${it.type}','${it.id}')">Cancel</button>
     </div>`).join('')}</div>`;
+
+  items.forEach((it, i) => renderAddToCalendar(`addCal-${i}`, {
+    title: it.label, date: it.date, startTime: it.startTime, durationHrs: it.durationHrs || 2,
+    location: it.location, description: it.description,
+  }));
 }
 
 window.__cancelItem = async (type, id) => {

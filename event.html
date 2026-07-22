@@ -21,6 +21,7 @@ import {
 } from "./js/firebase-init.js";
 import { toast, showOverlay, closeOverlay, bubbleRowHtml, esc, renderHeader } from "./js/common.js";
 import { renderChatPanel } from "./js/chat.js";
+import { renderAddToCalendar } from "./js/calendar.js";
 
 const root = document.getElementById('root');
 const params = new URLSearchParams(location.search);
@@ -89,6 +90,7 @@ function render() {
           ? `<button class="btn btn-ghost" id="unrsvpBtn">Un-RSVP</button>`
           : `<button class="btn btn-primary" id="rsvpBtn">RSVP</button>`}
       </div>
+      <div id="addCalEvent"></div>
     </div>
 
     ${ev.location ? `<div class="card" style="padding:0;margin-top:16px;overflow:hidden">
@@ -124,6 +126,10 @@ function render() {
   </div>`;
 
   renderChatPanel('eventChat', 'event', eventId, { canModerate: isAdminHere });
+  renderAddToCalendar('addCalEvent', {
+    title: ev.title, date: ev.date, startTime: ev.time, durationHrs: 2,
+    location: ev.location, description: ev.description,
+  });
   wireHandlers(isAdminHere);
   loadPhotos();
   if (isAdminHere) loadCoAdminPicker();
