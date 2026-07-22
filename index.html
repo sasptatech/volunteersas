@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>VolunteerSAS — Home</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<div id="root"></div>
+<div id="ovl"></div>
+
+<script type="module">
+import {
+  watchAuth, googleSignIn, emailSignUp, emailSignIn, completeProfile,
+  getProfile, ECOSYSTEMS, TERMS_TEXT, COMMUNITY_NORMS_SUMMARY
+} from "./js/auth.js";
+import { toast, showOverlay, closeOverlay, bubbleRowHtml, esc, renderHeader } from "./js/common.js";
+import { db, collection, onSnapshot, query, orderBy } from "./js/firebase-init.js";
+
+const root = document.getElementById('root');
+let joinStep = 1;
+let joinDraft = { displayName:'', phone:'', divisions:[], anonymous:false, status:'', agreed:false };
+let authMode = 'signup';
+let events = [];
+
+watchAuth(
+  (profile, needsProfile) => {
+    if (needsProfile) { renderJoinStep(); return; }
+    renderApp(profile);
+  },
+  () => { renderAuthGate(); }
+);
+
+function renderAuthGate() {
+  root.innerHTML = `<div class="join-wrap"><div class="join-card">
+    <div style="text-align:center;margin-bottom:18px"><div style="font-size:36px">🦅</div>
+      <h1 class="serif" style="font-size:22px;margin:6px 0 2px;color:var(--red)">VolunteerSAS</h1>
+      <div style="font-size:13px;color:var(--ink-soft)">${authMode==='signup'?'Create your account to join':'Sign in to your account'}</div>
+    </div>
+    <button class="google-btn" id="googleBtn"><svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.4 0 6.4 1.2 8.8 3.5l6.6-6.6C35.3 2.5 30 0 24 0 14.6 0 6.5 5.4 2.5 13.2l7.7 6C12 13 17.5 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.5 3-2.2 5.5-4.7 7.2l7.3 5.7c4.3-4 6.8-9.8 6.8-17.4z"/><path fill="#FBBC05" d="M10.2 19.2A14.5 14.5 0 0 0 9.5 24c0 1.7.3 3.3.7 4.8l-7.7 6A24 24 0 0 1 0 24c0-3.9.9-7.6 2.5-10.8z"/><path fill="#34A853" d="M24 48c6 0 11.3-2 15-5.5l-7.3-5.7c-2 1.4-4.6 2.2-7.7 2.2-6.5 0-12-4.5-13.8-10.5l-7.7 6C6.5 42.6 14.6 48 24 48z"/></svg>Continue with Google</button>
+    <div class="hr-divider">or use email</div>
+    <div class="form-row"><label>Email</label><input id="authEmail" placeholder="you@example.com"></div>
+    <div class="form-row"><label>Password</label><input id="authPassword" type="password" placeholder="${authMode==='signup'?'Create a password (6+ characters)':'Your password'}"></div>
+    <div id="authErr"></div>
+    <button class="btn btn-primary" style="width:100%" id="authSubmit">${authMode==='signup'?'Create account':'Sign in'}</button>
+    <div style="text-align:center;margin-top:14px"><button class="small-link" id="toggleAuthMode">${authMode==='signup'?'Already have an account? Sign in':'New here? Create an account'}</button></div>
+  </div></div>`;
+
+  document.getElementById('googleBtn').onclick = async () => {
+    try { await googleSignIn(); } catch (e) { toast('Google sign-in failed: ' + e.message); }
+  };
+  document.getElementById('authSubmit').onclick = async () => {
+    const email = document.getElementById('authEmail').value.trim();
+    const pass = document.getElementById('authPassword').value;
+    const errEl = document.getElementById('authErr');
+    errEl.innerHTML = '';
+    if (!email || pass.length < 6) { errEl.innerHTML = `<div class="err-text">Enter a valid email and a 6+ character password.</div>`; return; }
+    try {
+      if (authMode === 'signup') await emailSignUp(email, pass);
+      else await emailSignIn(email, pass);
+    } catch (e) {
+      if (e.code === 'auth/email-already-in-use') { authMode = 'signin'; renderAuthGate(); toast('Account exists — sign in instead.'); }
+      else errEl.innerHTML = `<div class="err-text">${esc(e.message)}</div>`;
+    }
+  };
+  document.getElementById('toggleAuthMode').onclick = () => { authMode = authMode === 'signup' ? 'signin' : 'signup'; renderAuthGate(); };
+}
+
+function renderJoinStep() {
+  const d = joinDraft;
+  let body;
+  if (joinStep === 1) {
+    body = `
+      <div class="form-row"><label>Display name</label><input id="jName" value="${esc(d.displayName)}" placeholder="How others will see you"></div>
+      <div class="form-row"><label>Phone number (optional, admins only)</label><input id="jPhone" value="${esc(d.phone)}" placeholder="+65 9123 4567"></div>
+      <div class="form-row"><label>Divisions that apply to you</label>
+        <div class="role-grid">${ECOSYSTEMS.map(e=>`<button type="button" class="role-opt ${d.divisions.includes(e.id)?'active':''}" data-div="${e.id}">${e.icon} ${e.name}</button>`).join('')}</div>
+      </div>
+      <div class="form-row"><label style="display:flex;align-items:center;gap:8px;font-weight:600"><input type="checkbox" id="jAnon" style="width:auto" ${d.anonymous?'checked':''}> Keep my details anonymous to other volunteers</label></div>
+      <button class="btn btn-primary" style="width:100%" id="joinNext">Continue</button>`;
+  } else {
+    body = `
+      <div class="form-row"><label>Status (optional — shown on your profile, editable anytime)</label><textarea id="jStatus" rows="2" placeholder="e.g. Happy to help with Sports Day!">${esc(d.status)}</textarea></div>
+      <div class="privacy-note">${esc(COMMUNITY_NORMS_SUMMARY)}</div>
+      <div class="privacy-note">${esc(TERMS_TEXT)}</div>
+      <label class="terms-check"><input type="checkbox" id="jAgree" ${d.agreed?'checked':''}> I have read and agree to the terms above, including the SAS Community Norms.</label>
+      <div id="joinErr"></div>
+      <button class="btn btn-primary" style="width:100%" id="joinFinish">Join VolunteerSAS</button>
+      <button class="btn btn-ghost" style="width:100%;margin-top:8px" id="joinBack">Back</button>`;
+  }
+  root.innerHTML = `<div class="join-wrap"><div class="join-card">
+    <div style="text-align:center;margin-bottom:18px"><div style="font-size:36px">🦅</div>
+      <h1 class="serif" style="font-size:22px;margin:6px 0 2px;color:var(--red)">VolunteerSAS</h1>
+      <div style="font-size:13px;color:var(--ink-soft)">Tell us a bit about yourself</div>
+    </div>
+    <div class="progress"><div class="bar" style="width:${joinStep===1?'50%':'100%'}"></div></div>
+    ${body}
+  </div></div>`;
+
+  if (joinStep === 1) {
+    document.querySelectorAll('.role-opt').forEach(b => b.onclick = () => {
+      const id = b.dataset.div;
+      const i = d.divisions.indexOf(id);
+      if (i >= 0) d.divisions.splice(i, 1); else d.divisions.push(id);
+      b.classList.toggle('active');
+    });
+    document.getElementById('joinNext').onclick = () => {
+      d.displayName = document.getElementById('jName').value.trim();
+      d.phone = document.getElementById('jPhone').value.trim();
+      d.anonymous = document.getElementById('jAnon').checked;
+      if (!d.displayName) { toast('Please enter a display name.'); return; }
+      joinStep = 2; renderJoinStep();
+    };
+  } else {
+    document.getElementById('joinBack').onclick = () => { joinStep = 1; renderJoinStep(); };
+    document.getElementById('joinFinish').onclick = async () => {
+      d.status = document.getElementById('jStatus').value.trim();
+      d.agreed = document.getElementById('jAgree').checked;
+      if (!d.agreed) { document.getElementById('joinErr').innerHTML = `<div class="err-text">Please agree to the terms to continue.</div>`; return; }
+      try {
+        await completeProfile(d);
+        toast('Welcome to VolunteerSAS!');
+      } catch (e) { toast('Could not save profile: ' + e.message); }
+    };
+  }
+}
+
+function renderApp(profile) {
+  root.innerHTML = `<div id="app"><div class="section" id="feed"><p style="color:var(--ink-soft)">Loading events…</p></div></div>`;
+  renderHeader('index.html');
+  const q = query(collection(db, 'events'), orderBy('date'));
+  onSnapshot(q, snap => {
+    events = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderFeed();
+  }, err => { document.getElementById('feed').innerHTML = `<p style="color:var(--ink-soft)">Could not load events: ${esc(err.message)}</p>`; });
+}
+
+function renderFeed() {
+  const feed = document.getElementById('feed');
+  if (!feed) return;
+  if (!events.length) { feed.innerHTML = `<p style="color:var(--ink-soft)">No events yet — check back soon.</p>`; return; }
+  feed.innerHTML = `<div class="grid">${events.map(ev => `
+    <a class="card" href="event.html?id=${ev.id}" style="display:block;padding:14px;border-left:5px solid var(--navy)">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--ink-soft)">${(ev.divisions||[]).join(', ')}</div>
+      <h3 style="margin:4px 0 6px;font-size:16.5px">${esc(ev.title||'Untitled event')}</h3>
+      <div style="font-size:12.5px;color:var(--ink-soft)">📅 ${esc(ev.date||'')} · 📍 ${esc(ev.location||'')}</div>
+    </a>`).join('')}</div>`;
+}
+</script>
+</body>
+</html>
