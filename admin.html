@@ -17,9 +17,10 @@
 import { watchAuth, getProfile, isSuperadmin, isAdmin, isStoreAdmin, isAnyAdminTier, ECOSYSTEMS } from "./js/auth.js";
 import {
   db, collection, doc, addDoc, updateDoc, deleteDoc, getDocs, getDoc, onSnapshot,
-  serverTimestamp, query, where
+  serverTimestamp, query, where, storageRef, uploadBytes, getDownloadURL, arrayUnion
 } from "./js/firebase-init.js";
 import { toast, showOverlay, closeOverlay, esc, renderHeader } from "./js/common.js";
+import { rteHtml, rteValue } from "./js/rte.js";
 
 const root = document.getElementById('root');
 let tab = 'events';
@@ -70,7 +71,10 @@ function render() {
 function renderEventsTab() {
   const mine = isSuperadmin() ? events : events.filter(e => (e.adminUids || []).includes(getProfile().uid));
   return `
-    <button class="btn btn-primary" id="newEventBtn" style="margin-bottom:14px">+ Create event</button>
+    <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+      <button class="btn btn-primary" id="newEventBtn">+ Create event</button>
+      ${isSuperadmin() ? `<button class="btn btn-ghost" id="seedBtn">🌱 Seed test events</button>` : ''}
+    </div>
     <div class="grid">${mine.map(e => `
       <div class="card" style="padding:14px">
         <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--ink-soft)">${(e.divisions || []).join(', ')}</div>
@@ -129,11 +133,13 @@ function wireTabHandlers() {
       <div class="form-row"><label>Date</label><input type="date" id="neDate"></div>
       <div class="form-row"><label>Time</label><input id="neTime" placeholder="e.g. 9:00 AM"></div>
       <div class="form-row"><label>Location</label><input id="neLoc"></div>
-      <div class="form-row"><label>Description</label><textarea id="neDesc" rows="3"></textarea></div>
+      <div class="form-row"><label>Description</label>${rteHtml('neDescRTE')}</div>
+      <div class="form-row"><label>Attachments (documents — optional)</label><input type="file" id="neAttachments" multiple></div>
+      <div class="form-row"><label>Photos (optional)</label><input type="file" id="neOwnPhotos" multiple accept="image/*"></div>
       <div class="form-row"><label>Divisions</label>
-        <div class="role-grid">${ECOSYSTEMS.map(e => `<button type="button" class="role-opt" data-div="${e.short}">${e.icon} ${e.name}</button>`).join('')}</div>
+        <div class="role-grid">${ECOSYSTEMS.map(e => `<button type="button" class="role-opt" data-div="${e.id}">${e.icon} ${e.name}</button>`).join('')}</div>
       </div>
-      <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin-bottom:12px"><input type="checkbox" id="neSchoolwide" style="width:auto"> Schoolwide event (auto-tags LE + UE + MS + HS)</label>
+      <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin-bottom:12px"><input type="checkbox" id="neSchoolwide" style="width:auto"> Schoolwide event (auto-tags all divisions)</label>
       <button class="btn btn-primary" style="width:100%" id="neSave">Create event</button>
     </div>`);
     document.querySelectorAll('#ovl .role-opt').forEach(b => b.onclick = () => b.classList.toggle('active'));
@@ -142,17 +148,34 @@ function wireTabHandlers() {
       const date = document.getElementById('neDate').value;
       if (!title || !date) { toast('Title and date are required.'); return; }
       const schoolwide = document.getElementById('neSchoolwide').checked;
-      const divisions = schoolwide ? ['LE', 'UE', 'MS', 'HS'] : [...document.querySelectorAll('#ovl .role-opt.active')].map(b => b.dataset.div);
+      const divisions = schoolwide ? ECOSYSTEMS.map(e => e.id) : [...document.querySelectorAll('#ovl .role-opt.active')].map(b => b.dataset.div);
+      const saveBtn = document.getElementById('neSave');
+      saveBtn.disabled = true; saveBtn.textContent = 'Creating…';
       try {
         const ref = await addDoc(collection(db, 'events'), {
           title, date, time: document.getElementById('neTime').value.trim(),
           location: document.getElementById('neLoc').value.trim(),
-          description: document.getElementById('neDesc').value.trim(),
-          divisions, adminUids: [getProfile().uid], attachments: [], createdAt: serverTimestamp(),
+          description: rteValue('neDescRTE'),
+          divisions, adminUids: [getProfile().uid], attachments: [], photos: [], createdAt: serverTimestamp(),
         });
+        const { storage } = await import("./js/firebase-init.js");
+        const attachFiles = [...document.getElementById('neAttachments').files];
+        for (const file of attachFiles) {
+          const r = storageRef(storage, `eventAttachments/${ref.id}/${Date.now()}_${file.name}`);
+          await uploadBytes(r, file);
+          const url = await getDownloadURL(r);
+          await updateDoc(doc(db, 'events', ref.id), { attachments: arrayUnion({ name: file.name, url }) });
+        }
+        const photoFiles = [...document.getElementById('neOwnPhotos').files];
+        for (const file of photoFiles) {
+          const r = storageRef(storage, `eventPhotos/${ref.id}/${Date.now()}_${file.name}`);
+          await uploadBytes(r, file);
+          const url = await getDownloadURL(r);
+          await updateDoc(doc(db, 'events', ref.id), { photos: arrayUnion(url) });
+        }
         await logAudit('Created event', title);
         closeOverlay(); toast('Event created!');
-      } catch (e) { toast('Could not create event: ' + e.message); }
+      } catch (e) { toast('Could not create event: ' + e.message); saveBtn.disabled = false; saveBtn.textContent = 'Create event'; }
     };
   };
 
@@ -160,6 +183,25 @@ function wireTabHandlers() {
     if (!confirm('Delete this event? This cannot be undone.')) return;
     try { await deleteDoc(doc(db, 'events', id)); await logAudit('Deleted event', id); toast('Event deleted.'); }
     catch (e) { toast('Could not delete: ' + e.message); }
+  };
+
+  const seedBtn = document.getElementById('seedBtn');
+  if (seedBtn) seedBtn.onclick = async () => {
+    if (!confirm('Create 5 sample test events?')) return;
+    const samples = [
+      { title: 'Storytime Helpers', date: '2026-08-17', time: '9:00 AM', location: 'LE Library', description: 'Read aloud to our youngest learners.', divisions: ['le'] },
+      { title: 'Reading Buddies', date: '2026-08-18', time: '9:30 AM', location: 'UE Library', description: 'Pair up with a student for reading practice.', divisions: ['ue'] },
+      { title: 'Drama Crew', date: '2026-08-19', time: '3:00 PM', location: 'MS Theatre', description: 'Help backstage for the fall production.', divisions: ['ms'] },
+      { title: 'College Prep Workshop', date: '2026-08-20', time: '1:00 PM', location: 'HS Career Center', description: 'Support seniors with application materials.', divisions: ['hs'] },
+      { title: 'Sports Day', date: '2026-08-21', time: '8:00 AM', location: 'Athletic Field', description: 'Schoolwide field day — all hands welcome.', divisions: ['le', 'ue', 'ms', 'hs'] },
+    ];
+    try {
+      for (const s of samples) {
+        await addDoc(collection(db, 'events'), { ...s, adminUids: [getProfile().uid], createdAt: serverTimestamp() });
+      }
+      await logAudit('Seeded test events', `${samples.length} events`);
+      toast('5 test events created.');
+    } catch (e) { toast('Could not seed: ' + e.message); }
   };
 
   window.__verifyHours = async (id) => {

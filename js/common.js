@@ -42,7 +42,8 @@ window.closeOverlay = closeOverlay; // used by inline onclick handlers in modal 
 
 const NAV_ITEMS = [
   ['index.html', '⭐ Discover'],
-  ['cafe.html', '☕ PTA Cafe'],
+  ['cafe.html', '☕ Cafe Volunteer'],
+  ['menu.html', '🍽️ PTA Cafe'],
   ['schedule.html', '📅 My Schedule'],
 ];
 

@@ -131,26 +131,49 @@ function renderJoinStep() {
 }
 
 function renderApp(profile) {
-  root.innerHTML = `<div id="app"><div class="section" id="feed"><p style="color:var(--ink-soft)">Loading events…</p></div></div>`;
+  root.innerHTML = `<div id="app"><div class="section">
+    <div style="background:var(--red);border-radius:14px;padding:18px 20px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center;gap:16px;cursor:pointer" onclick="location.href='cafe.html'">
+      <div>
+        <div style="font-size:11px;font-weight:700;color:#FAD9DC;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Featured</div>
+        <div style="font-size:17px;font-weight:700;color:#fff;margin-bottom:4px">☕ Cafe Volunteer shifts</div>
+        <div style="font-size:13px;color:#F4C7CB">See this week's open slots and sign up</div>
+      </div>
+      <div style="background:#fff;color:var(--red);padding:9px 16px;border-radius:9px;font-size:13.5px;font-weight:700;white-space:nowrap">View shifts →</div>
+    </div>
+    <div id="pills" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px"></div>
+    <div id="feed"><p style="color:var(--ink-soft)">Loading events…</p></div>
+  </div></div>`;
   renderHeader('index.html');
   const q = query(collection(db, 'events'), orderBy('date'));
   onSnapshot(q, snap => {
     events = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderPills();
     renderFeed();
   }, err => { document.getElementById('feed').innerHTML = `<p style="color:var(--ink-soft)">Could not load events: ${esc(err.message)}</p>`; });
+}
+
+let ecoFilter = 'all';
+function renderPills() {
+  const el = document.getElementById('pills');
+  if (!el) return;
+  el.innerHTML = `<button class="btn ${ecoFilter === 'all' ? 'btn-primary' : 'btn-ghost'}" data-f="all">All divisions</button>` +
+    ECOSYSTEMS.map(e => `<button class="btn ${ecoFilter === e.id ? 'btn-primary' : 'btn-ghost'}" data-f="${e.id}">${e.icon} ${e.short}</button>`).join('');
+  el.querySelectorAll('[data-f]').forEach(b => b.onclick = () => { ecoFilter = b.dataset.f; renderPills(); renderFeed(); });
 }
 
 function renderFeed() {
   const feed = document.getElementById('feed');
   if (!feed) return;
-  if (!events.length) { feed.innerHTML = `<p style="color:var(--ink-soft)">No events yet — check back soon.</p>`; return; }
-  feed.innerHTML = `<div class="grid">${events.map(ev => `
+  const list = ecoFilter === 'all' ? events : events.filter(ev => (ev.divisions || []).includes(ecoFilter));
+  if (!list.length) { feed.innerHTML = `<p style="color:var(--ink-soft)">No events yet — check back soon.</p>`; return; }
+  feed.innerHTML = `<div class="grid">${list.map(ev => `
     <a class="card" href="event.html?id=${ev.id}" style="display:block;padding:14px;border-left:5px solid var(--navy)">
-      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--ink-soft)">${(ev.divisions||[]).join(', ')}</div>
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--ink-soft)">${(ev.divisions||[]).map(divLabel).join(', ')}</div>
       <h3 style="margin:4px 0 6px;font-size:16.5px">${esc(ev.title||'Untitled event')}</h3>
       <div style="font-size:12.5px;color:var(--ink-soft)">📅 ${esc(ev.date||'')} · 📍 ${esc(ev.location||'')}</div>
     </a>`).join('')}</div>`;
 }
+function divLabel(id) { const e = ECOSYSTEMS.find(x => x.id === id); return e ? e.short : id; }
 </script>
 </body>
 </html>

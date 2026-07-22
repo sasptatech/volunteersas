@@ -57,8 +57,19 @@ export function watchAuth(onSignedIn, onSignedOut) {
   onAuthStateChanged(auth, async (user) => {
     if (!user) { notifyProfile(null); onSignedOut && onSignedOut(); return; }
     const snap = await getDoc(doc(db, "users", user.uid));
-    if (snap.exists()) {
-      notifyProfile({ uid: user.uid, ...snap.data() });
+    const DEFAULTS = {
+      displayName: user.displayName || 'Volunteer', email: user.email || '', phone: '',
+      divisions: [], anonymous: false, status: '', photoURL: '', emailOptOut: false,
+      isAdmin: false, isStoreAdmin: false, isSuperadmin: false,
+    };
+    if (snap.exists() && snap.data().displayName) {
+      notifyProfile({ uid: user.uid, ...DEFAULTS, ...snap.data() });
+      onSignedIn && onSignedIn(currentProfile, false);
+    } else if (snap.exists()) {
+      // Doc exists but is incomplete (e.g. created by manually adding an admin
+      // flag in the console rather than via the join flow). Merge in safe
+      // defaults so nothing downstream ever writes `undefined` to Firestore.
+      notifyProfile({ uid: user.uid, ...DEFAULTS, ...snap.data() });
       onSignedIn && onSignedIn(currentProfile, false);
     } else {
       notifyProfile(null);

@@ -58,7 +58,7 @@ export function renderChatPanel(containerId, scope, scopeId, opts = {}) {
     const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     try {
       await addDoc(collection(db, "chatMessages"), {
-        scope, scopeId, uid: myUid(), name: myName(), anonymous: isAnonymous(),
+        scope, scopeId, uid: myUid(), name: myName() || 'Volunteer', anonymous: isAnonymous(),
         text, createdAt: serverTimestamp(), expiresAt: expires,
       });
       input.value = '';

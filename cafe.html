@@ -17,7 +17,7 @@
 import { watchAuth, getProfile, isStoreAdmin } from "./js/auth.js";
 import {
   db, collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot, query, where,
-  serverTimestamp, storageRef, uploadBytes, getDownloadURL
+  serverTimestamp
 } from "./js/firebase-init.js";
 import {
   SHIFT_TYPES, SCHOOL_START, SCHOOL_END, isSchoolDay, mondayOf, weekDates, shiftWeek, fmtDayLabel, pad
@@ -27,7 +27,7 @@ import { renderChatPanel } from "./js/chat.js";
 import { renderAddToCalendar } from "./js/calendar.js";
 
 const root = document.getElementById('root');
-let cafeSignups = [], dayOverrides = {}, menuUrl = '';
+let cafeSignups = [], dayOverrides = {};
 let view = 'week';
 let weekStart = mondayOf(SCHOOL_START);
 let month = SCHOOL_START.slice(0, 7);
@@ -51,7 +51,6 @@ function watchData() {
     dayOverrides = {}; snap.docs.forEach(d => { dayOverrides[d.id] = d.data().status; });
     render();
   });
-  onSnapshot(doc(db, 'settings', 'cafeMenu'), snap => { menuUrl = snap.exists() ? snap.data().url : ''; render(); });
 }
 
 function signupsFor(date, shift) { return cafeSignups.filter(s => s.date === date && s.shift === shift); }
@@ -61,9 +60,8 @@ function mySignup(date, shift) { return cafeSignups.find(s => s.date === date &&
 function render() {
   const storeAdmin = isStoreAdmin();
   root.innerHTML = `<div class="section">
-    <h1 class="serif" style="font-size:22px">☕ PTA Cafe</h1>
-
-    ${menuUrl ? `<div class="card" style="padding:14px;margin-bottom:16px"><a href="${esc(menuUrl)}" target="_blank" class="small-link">📄 View this term's menu (PDF)</a></div>` : ''}
+    <h1 class="serif" style="font-size:22px">☕ Cafe Volunteer</h1>
+    <div class="card" style="padding:14px;margin-bottom:16px"><a href="menu.html" class="small-link">🍽️ View this term's PTA Cafe menu →</a></div>
 
     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap">
       <div style="display:flex;gap:6px">
@@ -79,14 +77,12 @@ function render() {
 
     ${storeAdmin ? `<div class="card" style="padding:18px;margin-top:18px;border-left:4px solid var(--navy)">
       <h3 style="margin-top:0">Store Admin tools</h3>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
         <button class="btn btn-ghost" id="openDayBtn">Open store on a specific day</button>
         <button class="btn btn-ghost" id="closeDayBtn">Close store on a specific day</button>
         <button class="btn btn-ghost" id="extraSlotBtn">Add extra slot with message</button>
       </div>
-      <label style="font-size:12.5px;font-weight:600;color:var(--ink-soft)">Upload/replace menu PDF</label><br>
-      <input type="file" id="menuFile" accept="application/pdf">
-      <button class="btn btn-ghost" id="menuUploadBtn">Upload</button>
+      <div style="font-size:12px;color:var(--ink-soft);margin-top:10px">To update the menu, go to the <a href="menu.html" class="small-link">PTA Cafe</a> page.</div>
     </div>` : ''}
 
     <div class="card" style="padding:18px;margin-top:18px">
@@ -107,19 +103,6 @@ function render() {
     document.getElementById('openDayBtn').onclick = () => promptDayOverride('open');
     document.getElementById('closeDayBtn').onclick = () => promptDayOverride('closed');
     document.getElementById('extraSlotBtn').onclick = () => promptExtraSlot();
-    document.getElementById('menuUploadBtn').onclick = async () => {
-      const file = document.getElementById('menuFile').files[0];
-      if (!file) return;
-      try {
-        const { storage } = await import("./js/firebase-init.js");
-        const r = storageRef(storage, `cafeMenu/menu.pdf`);
-        await uploadBytes(r, file);
-        const url = await getDownloadURL(r);
-        const { setDoc } = await import("./js/firebase-init.js");
-        await setDoc(doc(db, 'settings', 'cafeMenu'), { url, updatedAt: serverTimestamp() });
-        toast('Menu updated.');
-      } catch (e) { toast('Upload failed: ' + e.message); }
-    };
   }
 
   const bodyEl = document.getElementById('cafeBody');

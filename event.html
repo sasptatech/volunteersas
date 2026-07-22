@@ -22,6 +22,7 @@ import {
 import { toast, showOverlay, closeOverlay, bubbleRowHtml, esc, renderHeader } from "./js/common.js";
 import { renderChatPanel } from "./js/chat.js";
 import { renderAddToCalendar } from "./js/calendar.js";
+import { rteHtml, rteValue } from "./js/rte.js";
 
 const root = document.getElementById('root');
 const params = new URLSearchParams(location.search);
@@ -73,10 +74,10 @@ function render() {
 
     <div class="card" style="padding:20px;margin-top:12px">
       ${editing ? renderEditForm() : `
-        <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--ink-soft)">${(ev.divisions || []).join(', ')}</div>
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--ink-soft)">${(ev.divisions || []).map(id => (ECOSYSTEMS.find(e => e.id === id) || {}).short || id).join(', ')}</div>
         <h1 class="serif" style="font-size:24px;margin:6px 0">${esc(ev.title || 'Untitled event')}</h1>
         <div style="font-size:13.5px;color:var(--ink-soft);margin-bottom:14px">📅 ${esc(ev.date || '')} ${ev.time ? '· ' + esc(ev.time) : ''} · 📍 ${esc(ev.location || '')}</div>
-        <p style="font-size:14px;line-height:1.6">${esc(ev.description || '')}</p>
+        <div style="font-size:14px;line-height:1.6">${ev.description || ''}</div>
       `}
       ${isAdminHere && !editing ? `<button class="btn btn-ghost" style="margin-top:10px" id="editBtn">✏️ Edit event</button>` : ''}
     </div>
@@ -93,21 +94,19 @@ function render() {
       <div id="addCalEvent"></div>
     </div>
 
+    ${(ev.attachments || []).length ? `<div class="card" style="padding:18px;margin-top:16px">
+      <h3 style="margin-top:0">📎 Attachments</h3>
+      ${(ev.attachments || []).map(a => `<div style="font-size:13.5px;padding:4px 0"><a href="${esc(a.url)}" target="_blank" class="small-link">📄 ${esc(a.name)}</a></div>`).join('')}
+    </div>` : ''}
+
+    ${(ev.photos || []).length ? `<div class="card" style="padding:18px;margin-top:16px">
+      <h3 style="margin-top:0">📷 Photos</h3>
+      <div class="grid">${(ev.photos || []).map(url => `<div class="card" style="overflow:hidden;padding:0"><img src="${esc(url)}" style="width:100%;display:block"></div>`).join('')}</div>
+    </div>` : ''}
+
     ${ev.location ? `<div class="card" style="padding:0;margin-top:16px;overflow:hidden">
       <iframe src="https://web.mappedin.com/singapore-american-school/singapore-american-school.html#/" style="width:100%;height:340px;border:0" allow="clipboard-write 'self'; web-share 'self'"></iframe>
     </div>` : ''}
-
-    <div class="card" style="padding:18px;margin-top:16px">
-      <h3 style="margin-top:0">📎 Attachments</h3>
-      <div id="attachList">${renderAttachments()}</div>
-      ${isAdminHere ? `<div style="margin-top:10px"><input type="file" id="attachFile"><button class="btn btn-ghost" id="attachUploadBtn">Upload</button></div>` : ''}
-    </div>
-
-    <div class="card" style="padding:18px;margin-top:16px">
-      <h3 style="margin-top:0">📷 Photos</h3>
-      <div id="photoGrid" class="grid">Loading…</div>
-      ${isAdminHere ? `<div style="margin-top:10px"><input type="file" id="photoFile" accept="image/*"><button class="btn btn-ghost" id="photoUploadBtn">Post photo</button></div>` : ''}
-    </div>
 
     <div class="card" style="padding:18px;margin-top:16px">
       <h3 style="margin-top:0">💬 Discussion</h3>
@@ -131,7 +130,6 @@ function render() {
     location: ev.location, description: ev.description,
   });
   wireHandlers(isAdminHere);
-  loadPhotos();
   if (isAdminHere) loadCoAdminPicker();
 }
 
@@ -147,21 +145,17 @@ function renderAttendeeAdminList(attendees) {
   </div>`;
 }
 
-function renderAttachments() {
-  const list = ev.attachments || [];
-  if (!list.length) return `<p style="color:var(--ink-soft);font-size:13px">No attachments yet.</p>`;
-  return list.map(a => `<div style="font-size:13.5px;padding:4px 0"><a href="${esc(a.url)}" target="_blank" class="small-link">📄 ${esc(a.name)}</a></div>`).join('');
-}
-
 function renderEditForm() {
   return `
     <div class="form-row"><label>Title</label><input id="edTitle" value="${esc(ev.title || '')}"></div>
     <div class="form-row"><label>Date</label><input id="edDate" type="date" value="${esc(ev.date || '')}"></div>
     <div class="form-row"><label>Time</label><input id="edTime" value="${esc(ev.time || '')}" placeholder="e.g. 9:00 AM"></div>
     <div class="form-row"><label>Location</label><input id="edLoc" value="${esc(ev.location || '')}"></div>
-    <div class="form-row"><label>Description</label><textarea id="edDesc" rows="4">${esc(ev.description || '')}</textarea></div>
+    <div class="form-row"><label>Description</label>${rteHtml('edDescRTE', ev.description || '')}</div>
+    <div class="form-row"><label>Add attachments</label><input type="file" id="edAttachments" multiple></div>
+    <div class="form-row"><label>Add photos</label><input type="file" id="edPhotos" multiple accept="image/*"></div>
     <div class="form-row"><label>Divisions</label>
-      <div class="role-grid">${ECOSYSTEMS.map(e => `<button type="button" class="role-opt ${((ev.divisions || []).includes(e.short)) ? 'active' : ''}" data-div="${e.short}">${e.icon} ${e.name}</button>`).join('')}</div>
+      <div class="role-grid">${ECOSYSTEMS.map(e => `<button type="button" class="role-opt ${((ev.divisions || []).includes(e.id)) ? 'active' : ''}" data-div="${e.id}">${e.icon} ${e.name}</button>`).join('')}</div>
     </div>
     <button class="btn btn-primary" id="saveEditBtn">Save changes</button>
     <button class="btn btn-ghost" id="cancelEditBtn" style="margin-left:8px">Cancel</button>`;
@@ -175,17 +169,33 @@ function wireHandlers(isAdminHere) {
   const saveBtn = document.getElementById('saveEditBtn');
   if (saveBtn) saveBtn.onclick = async () => {
     const divisions = [...document.querySelectorAll('#root .role-opt.active')].map(b => b.dataset.div);
+    saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
     try {
       await updateDoc(doc(db, 'events', eventId), {
         title: document.getElementById('edTitle').value.trim(),
         date: document.getElementById('edDate').value,
         time: document.getElementById('edTime').value.trim(),
         location: document.getElementById('edLoc').value.trim(),
-        description: document.getElementById('edDesc').value.trim(),
+        description: rteValue('edDescRTE'),
         divisions,
       });
+      const { storage } = await import("./js/firebase-init.js");
+      const attachFiles = [...document.getElementById('edAttachments').files];
+      for (const file of attachFiles) {
+        const r = storageRef(storage, `eventAttachments/${eventId}/${Date.now()}_${file.name}`);
+        await uploadBytes(r, file);
+        const url = await getDownloadURL(r);
+        await updateDoc(doc(db, 'events', eventId), { attachments: arrayUnion({ name: file.name, url }) });
+      }
+      const photoFiles = [...document.getElementById('edPhotos').files];
+      for (const file of photoFiles) {
+        const r = storageRef(storage, `eventPhotos/${eventId}/${Date.now()}_${file.name}`);
+        await uploadBytes(r, file);
+        const url = await getDownloadURL(r);
+        await updateDoc(doc(db, 'events', eventId), { photos: arrayUnion(url) });
+      }
       editing = false; toast('Event updated.');
-    } catch (e) { toast('Could not save: ' + e.message); }
+    } catch (e) { toast('Could not save: ' + e.message); saveBtn.disabled = false; saveBtn.textContent = 'Save changes'; }
   };
 
   const rsvpBtn = document.getElementById('rsvpBtn');
@@ -212,48 +222,10 @@ function wireHandlers(isAdminHere) {
     } catch (e) { toast('Could not remove: ' + e.message); }
   };
 
-  const attachBtn = document.getElementById('attachUploadBtn');
-  if (attachBtn) attachBtn.onclick = async () => {
-    const file = document.getElementById('attachFile').files[0];
-    if (!file) return;
-    try {
-      const r = storageRef(await import("./js/firebase-init.js").then(m => m.storage), `eventAttachments/${eventId}/${Date.now()}_${file.name}`);
-      await uploadBytes(r, file);
-      const url = await getDownloadURL(r);
-      await updateDoc(doc(db, 'events', eventId), { attachments: arrayUnion({ name: file.name, url }) });
-      toast('Attachment uploaded.');
-    } catch (e) { toast('Upload failed: ' + e.message); }
-  };
-
-  const photoBtn = document.getElementById('photoUploadBtn');
-  if (photoBtn) photoBtn.onclick = async () => {
-    const file = document.getElementById('photoFile').files[0];
-    if (!file) return;
-    try {
-      const { storage } = await import("./js/firebase-init.js");
-      const r = storageRef(storage, `eventPhotos/${eventId}/${Date.now()}_${file.name}`);
-      await uploadBytes(r, file);
-      const url = await getDownloadURL(r);
-      await addDoc(collection(db, 'eventPhotos'), { eventId, url, uploadedBy: getProfile().displayName, createdAt: serverTimestamp() });
-      toast('Photo posted.');
-      loadPhotos();
-    } catch (e) { toast('Upload failed: ' + e.message); }
-  };
-
   const emailBtn = document.getElementById('emailAllBtn');
   if (emailBtn) emailBtn.onclick = () => {
     toast('Email sending isn\'t wired up yet (pending SendGrid setup) — this will queue once that\'s live.');
   };
-}
-
-function loadPhotos() {
-  onSnapshot(query(collection(db, 'eventPhotos'), where('eventId', '==', eventId)), snap => {
-    const grid = document.getElementById('photoGrid');
-    if (!grid) return;
-    const photos = snap.docs.map(d => d.data());
-    grid.innerHTML = photos.map(p => `<div class="card" style="overflow:hidden;padding:0"><img src="${esc(p.url)}" style="width:100%;display:block"></div>`).join('')
-      || `<p style="color:var(--ink-soft);font-size:13px">No photos yet.</p>`;
-  });
 }
 
 async function loadCoAdminPicker() {
