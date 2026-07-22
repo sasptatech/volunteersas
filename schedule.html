@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>VolunteerSAS — My Schedule</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<div id="root"><div class="section"><p style="color:var(--ink-soft)">Loading…</p></div></div>
+<div id="ovl"></div>
+
+<script type="module">
+import { watchAuth, getProfile } from "./js/auth.js";
+import { db, collection, query, where, onSnapshot, doc, getDoc, deleteDoc } from "./js/firebase-init.js";
+import { SHIFT_TYPES, fmtDayLabel } from "./js/cafe-dates.js";
+import { toast, renderHeader, esc } from "./js/common.js";
+
+const root = document.getElementById('root');
+let myEventSignups = [], myCafeSignups = [], eventCache = {};
+
+watchAuth((profile, needsProfile) => {
+  if (needsProfile) { location.href = 'index.html'; return; }
+  renderHeader('schedule.html');
+  root.innerHTML = `<div class="section"><h1 class="serif" style="font-size:22px">My Schedule</h1><div id="list"><p style="color:var(--ink-soft)">Loading…</p></div></div>`;
+  watchData(profile.uid);
+}, () => { location.href = 'index.html'; });
+
+function watchData(uid) {
+  onSnapshot(query(collection(db, 'signups'), where('uid', '==', uid)), async snap => {
+    myEventSignups = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    for (const s of myEventSignups) {
+      if (!eventCache[s.eventId]) {
+        const ed = await getDoc(doc(db, 'events', s.eventId));
+        if (ed.exists()) eventCache[s.eventId] = { id: ed.id, ...ed.data() };
+      }
+    }
+    render();
+  });
+  onSnapshot(query(collection(db, 'cafeSignups'), where('uid', '==', uid)), snap => {
+    myCafeSignups = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    render();
+  });
+}
+
+function render() {
+  const list = document.getElementById('list');
+  if (!list) return;
+  const items = [
+    ...myEventSignups.filter(s => eventCache[s.eventId]).map(s => ({
+      type: 'event', date: eventCache[s.eventId].date, id: s.id,
+      label: eventCache[s.eventId].title, sub: eventCache[s.eventId].location,
+      href: `event.html?id=${s.eventId}`,
+    })),
+    ...myCafeSignups.map(s => ({
+      type: 'cafe', date: s.date, id: s.id,
+      label: `PTA Cafe — ${(SHIFT_TYPES.find(t => t.id === s.shift) || {}).label || s.shift}`,
+      sub: fmtDayLabel(s.date), href: 'cafe.html',
+    })),
+  ].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+  if (!items.length) { list.innerHTML = `<p style="color:var(--ink-soft)">Nothing on your schedule yet — visit Discover or PTA Cafe to sign up.</p>`; return; }
+
+  list.innerHTML = `<div class="grid">${items.map(it => `
+    <div class="card" style="padding:14px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--ink-soft)">${it.type === 'cafe' ? '☕ PTA Cafe' : '🔍 Event'}</div>
+      <a href="${it.href}" style="display:block;margin:4px 0"><strong>${esc(it.label)}</strong></a>
+      <div style="font-size:12.5px;color:var(--ink-soft)">${esc(it.sub || '')}</div>
+      <button class="small-link" style="color:var(--red);margin-top:8px" onclick="window.__cancelItem('${it.type}','${it.id}')">Cancel</button>
+    </div>`).join('')}</div>`;
+}
+
+window.__cancelItem = async (type, id) => {
+  if (!confirm('Cancel this commitment?')) return;
+  try {
+    await deleteDoc(doc(db, type === 'cafe' ? 'cafeSignups' : 'signups', id));
+    toast('Cancelled.');
+  } catch (e) { toast('Could not cancel: ' + e.message); }
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,51 @@
+// cafe-dates.js — school-day/date helpers for PTA Cafe scheduling.
+export const SCHOOL_START = "2026-08-11";
+export const SCHOOL_END = "2027-06-04";
+export const HOLIDAY_RANGES = [
+  ["2026-08-10", "2026-08-10"],
+  ["2026-10-19", "2026-10-23"],
+  ["2026-11-09", "2026-11-09"],
+  ["2026-11-26", "2026-11-27"],
+  ["2026-12-21", "2027-01-08"],
+  ["2027-02-05", "2027-02-08"],
+  ["2027-03-10", "2027-03-10"],
+  ["2027-03-22", "2027-03-26"],
+  ["2027-05-01", "2027-05-01"],
+  ["2027-05-17", "2027-05-17"],
+  ["2027-05-20", "2027-05-20"],
+];
+export const SHIFT_TYPES = [
+  { id: "am", label: "8:30am – 12:00pm", hrs: 3.5 },
+  { id: "pm", label: "12:00pm – 4:00pm", hrs: 4 },
+];
+
+export function pad(n) { return n < 10 ? "0" + n : "" + n; }
+export function dstr(d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
+export function isHoliday(dateStr) { return HOLIDAY_RANGES.some(([s, e]) => dateStr >= s && dateStr <= e); }
+
+// dayOverrides: map of dateStr -> 'open' | 'closed' set by Store Admins (Firestore: cafeDayOverrides/{date})
+export function isSchoolDay(dateStr, dayOverrides = {}) {
+  if (dayOverrides[dateStr] === "open") return true;
+  if (dayOverrides[dateStr] === "closed") return false;
+  if (dateStr < SCHOOL_START || dateStr > SCHOOL_END) return false;
+  const dow = new Date(dateStr + "T00:00:00").getDay();
+  if (dow === 0 || dow === 6) return false;
+  return !isHoliday(dateStr);
+}
+export function mondayOf(dateStr) {
+  const d = new Date(dateStr + "T00:00:00");
+  const dow = d.getDay();
+  d.setDate(d.getDate() + (dow === 0 ? -6 : 1 - dow));
+  return dstr(d);
+}
+export function weekDates(mondayStr) {
+  const out = []; const d = new Date(mondayStr + "T00:00:00");
+  for (let i = 0; i < 5; i++) { out.push(dstr(d)); d.setDate(d.getDate() + 1); }
+  return out;
+}
+export function shiftWeek(mondayStr, dir) {
+  const d = new Date(mondayStr + "T00:00:00"); d.setDate(d.getDate() + dir * 7); return dstr(d);
+}
+export function fmtDayLabel(dateStr) {
+  return new Date(dateStr + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+}

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>VolunteerSAS — Profile</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<div id="root"><div class="section"><p style="color:var(--ink-soft)">Loading…</p></div></div>
+<div id="ovl"></div>
+
+<script type="module">
+import { watchAuth, getProfile, ECOSYSTEMS } from "./js/auth.js";
+import { db, doc, updateDoc, storageRef, uploadBytes, getDownloadURL } from "./js/firebase-init.js";
+import { toast, renderHeader, esc, bubbleHtml } from "./js/common.js";
+
+const root = document.getElementById('root');
+
+watchAuth((profile, needsProfile) => {
+  if (needsProfile) { location.href = 'index.html'; return; }
+  renderHeader();
+  render(profile);
+}, () => { location.href = 'index.html'; });
+
+function render(p) {
+  root.innerHTML = `<div class="section" style="max-width:560px;margin:0 auto">
+    <h1 class="serif" style="font-size:22px">Edit profile</h1>
+
+    <div class="card" style="padding:20px">
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px">
+        <div style="width:60px;height:60px;border-radius:50%;overflow:hidden;background:#EEE;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:22px">
+          ${p.photoURL ? `<img src="${esc(p.photoURL)}" style="width:100%;height:100%;object-fit:cover">` : esc((p.displayName || '?')[0])}
+        </div>
+        <div>
+          <input type="file" id="photoFile" accept="image/*">
+          <button class="btn btn-ghost" id="photoBtn" style="margin-top:6px">Upload photo</button>
+        </div>
+      </div>
+
+      <div class="form-row"><label>Display name</label><input id="pName" value="${esc(p.displayName || '')}"></div>
+      <div class="form-row"><label>Email</label><input id="pEmail" value="${esc(p.email || '')}"></div>
+      <div style="font-size:11.5px;color:var(--ink-soft);margin:-8px 0 12px">Changing your email may require you to sign out and back in.</div>
+      <div class="form-row"><label>Phone number (optional, WhatsApp number)</label><input id="pPhone" value="${esc(p.phone || '')}"></div>
+      <div class="form-row"><label>Status (shown on your profile)</label><textarea id="pStatus" rows="2">${esc(p.status || '')}</textarea></div>
+      <div class="form-row"><label>Divisions that apply to you</label>
+        <div class="role-grid">${ECOSYSTEMS.map(e => `<button type="button" class="role-opt ${(p.divisions || []).includes(e.id) ? 'active' : ''}" data-div="${e.id}">${e.icon} ${e.name}</button>`).join('')}</div>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;margin-bottom:10px"><input type="checkbox" id="pAnon" style="width:auto" ${p.anonymous ? 'checked' : ''}> Keep my details anonymous to other volunteers</label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;margin-bottom:16px"><input type="checkbox" id="pEmailOptOut" style="width:auto" ${p.emailOptOut ? 'checked' : ''}> Don't send me email notifications</label>
+
+      <button class="btn btn-primary" style="width:100%" id="saveBtn">Save changes</button>
+    </div>
+  </div>`;
+
+  document.querySelectorAll('.role-opt').forEach(b => b.onclick = () => b.classList.toggle('active'));
+
+  document.getElementById('photoBtn').onclick = async () => {
+    const file = document.getElementById('photoFile').files[0];
+    if (!file) { toast('Choose a photo first.'); return; }
+    try {
+      const { storage } = await import("./js/firebase-init.js");
+      const r = storageRef(storage, `profilePhotos/${p.uid}`);
+      await uploadBytes(r, file);
+      const url = await getDownloadURL(r);
+      await updateDoc(doc(db, 'users', p.uid), { photoURL: url });
+      toast('Photo updated — refresh to see it everywhere.');
+    } catch (e) { toast('Upload failed: ' + e.message); }
+  };
+
+  document.getElementById('saveBtn').onclick = async () => {
+    const divisions = [...document.querySelectorAll('.role-opt.active')].map(b => b.dataset.div);
+    const name = document.getElementById('pName').value.trim();
+    const phone = document.getElementById('pPhone').value.trim();
+    const email = document.getElementById('pEmail').value.trim();
+    if (!name) { toast('Name cannot be empty.'); return; }
+    try {
+      await updateDoc(doc(db, 'users', p.uid), {
+        displayName: name, phone, divisions,
+        status: document.getElementById('pStatus').value.trim(),
+        anonymous: document.getElementById('pAnon').checked,
+        emailOptOut: document.getElementById('pEmailOptOut').checked,
+      });
+      if (email && email !== p.email) {
+        try {
+          const { auth } = await import("./js/firebase-init.js");
+          const { updateEmail } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js");
+          await updateEmail(auth.currentUser, email);
+          await updateDoc(doc(db, 'users', p.uid), { email });
+        } catch (e) {
+          toast('Name/phone/divisions saved. Email change needs a recent sign-in — sign out and back in, then try again.');
+          return;
+        }
+      }
+      toast('Profile updated.');
+    } catch (e) { toast('Could not save: ' + e.message); }
+  };
+}
+</script>
+</body>
+</html>

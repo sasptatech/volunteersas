@@ -12,6 +12,9 @@ import {
   deleteDoc, onSnapshot, query, where, orderBy, limit, serverTimestamp,
   arrayUnion, arrayRemove, increment, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import {
+  getStorage, ref as storageRef, uploadBytes, getDownloadURL
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 import { initializeAppCheck, ReCaptchaV3Provider } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app-check.js";
 
 // TODO: replace with the STAGING project's config once that project exists.
@@ -44,11 +47,13 @@ try {
 
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+export const storage = getStorage(app);
 
 export {
   GoogleAuthProvider, onAuthStateChanged, createUserWithEmailAndPassword,
   signInWithEmailAndPassword, signInWithPopup, fbSignOut,
   collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc,
   onSnapshot, query, where, orderBy, limit, serverTimestamp,
-  arrayUnion, arrayRemove, increment, writeBatch
+  arrayUnion, arrayRemove, increment, writeBatch,
+  storageRef, uploadBytes, getDownloadURL
 };

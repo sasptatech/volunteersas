@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>VolunteerSAS — Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<div id="root"><div class="section"><p style="color:var(--ink-soft)">Loading…</p></div></div>
+<div id="ovl"></div>
+
+<script type="module">
+import { watchAuth, getProfile, isSuperadmin, isAdmin, isStoreAdmin, isAnyAdminTier, ECOSYSTEMS } from "./js/auth.js";
+import {
+  db, collection, doc, addDoc, updateDoc, deleteDoc, getDocs, getDoc, onSnapshot,
+  serverTimestamp, query, where
+} from "./js/firebase-init.js";
+import { toast, showOverlay, closeOverlay, esc, renderHeader } from "./js/common.js";
+
+const root = document.getElementById('root');
+let tab = 'events';
+let events = [], users = {}, hours = [], auditLog = [];
+
+watchAuth((profile, needsProfile) => {
+  if (needsProfile) { location.href = 'index.html'; return; }
+  if (!isAnyAdminTier()) { root.innerHTML = `<div class="section"><p>You don't have admin access.</p></div>`; return; }
+  renderHeader();
+  watchData();
+}, () => { location.href = 'index.html'; });
+
+function watchData() {
+  onSnapshot(collection(db, 'events'), snap => { events = snap.docs.map(d => ({ id: d.id, ...d.data() })); render(); });
+  onSnapshot(collection(db, 'users'), snap => {
+    users = {}; snap.docs.forEach(d => { users[d.id] = { uid: d.id, ...d.data() }; }); render();
+  });
+  if (isAnyAdminTier()) onSnapshot(collection(db, 'hours'), snap => { hours = snap.docs.map(d => ({ id: d.id, ...d.data() })); render(); });
+  if (isSuperadmin()) onSnapshot(collection(db, 'auditLog'), snap => { auditLog = snap.docs.map(d => ({ id: d.id, ...d.data() })); render(); });
+}
+
+async function logAudit(action, detail) {
+  try { await addDoc(collection(db, 'auditLog'), { actorUid: getProfile().uid, actor: getProfile().displayName, action, detail, createdAt: serverTimestamp() }); }
+  catch (e) { /* non-fatal */ }
+}
+
+function render() {
+  const tabs = [['events', '📅 Events'], ['hours', '⏱ Hours']];
+  if (isSuperadmin()) tabs.push(['members', '👥 Members'], ['audit', '🗒 Audit log']);
+
+  root.innerHTML = `<div class="section">
+    <h1 class="serif" style="font-size:22px">Admin</h1>
+    <div style="display:flex;gap:6px;margin-bottom:18px;flex-wrap:wrap">
+      ${tabs.map(([id, label]) => `<button class="btn ${tab === id ? 'btn-primary' : 'btn-ghost'}" data-tab="${id}">${label}</button>`).join('')}
+    </div>
+    <div id="tabBody"></div>
+  </div>`;
+  document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { tab = b.dataset.tab; render(); });
+
+  const body = document.getElementById('tabBody');
+  if (tab === 'events') body.innerHTML = renderEventsTab();
+  else if (tab === 'hours') body.innerHTML = renderHoursTab();
+  else if (tab === 'members' && isSuperadmin()) body.innerHTML = renderMembersTab();
+  else if (tab === 'audit' && isSuperadmin()) body.innerHTML = renderAuditTab();
+  wireTabHandlers();
+}
+
+function renderEventsTab() {
+  const mine = isSuperadmin() ? events : events.filter(e => (e.adminUids || []).includes(getProfile().uid));
+  return `
+    <button class="btn btn-primary" id="newEventBtn" style="margin-bottom:14px">+ Create event</button>
+    <div class="grid">${mine.map(e => `
+      <div class="card" style="padding:14px">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--ink-soft)">${(e.divisions || []).join(', ')}</div>
+        <h3 style="margin:4px 0 6px;font-size:15.5px">${esc(e.title || 'Untitled')}</h3>
+        <div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:8px">📅 ${esc(e.date || '')} · 📍 ${esc(e.location || '')}</div>
+        <a class="small-link" href="event.html?id=${e.id}">Open event page →</a>
+        <div style="margin-top:8px"><button class="small-link" style="color:var(--red)" onclick="window.__deleteEvent('${e.id}')">Delete event</button></div>
+      </div>`).join('') || `<p style="color:var(--ink-soft)">No events yet.</p>`}</div>`;
+}
+
+function renderHoursTab() {
+  const rows = hours.slice().sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+  return `<div class="card" style="padding:6px 16px;overflow-x:auto">
+    <table class="datatable"><thead><tr><th>Volunteer</th><th>Activity</th><th>Date</th><th>Hours</th><th>Status</th></tr></thead>
+    <tbody>${rows.map(h => {
+      const col = h.status === 'Verified' ? '#0E8A6D' : h.status === 'Pending' ? '#C9922B' : '#B01C2E';
+      return `<tr><td>${esc(h.volunteer)}</td><td>${esc(h.event)}</td><td>${esc(h.date)}</td><td>${h.hrs}</td>
+        <td><span class="status-pill" style="background:${col}22;color:${col}">${esc(h.status)}</span>
+        ${h.status !== 'Verified' ? `<button class="small-link" style="margin-left:6px" onclick="window.__verifyHours('${h.id}')">Verify</button>` : ''}</td></tr>`;
+    }).join('') || `<tr><td colspan="5" style="color:var(--ink-soft)">No hours logged yet.</td></tr>`}</tbody></table>
+  </div>`;
+}
+
+function renderMembersTab() {
+  const all = Object.values(users).sort((a, b) => (a.displayName || '').localeCompare(b.displayName || ''));
+  return `<div class="card" style="padding:6px 16px;overflow-x:auto">
+    <table class="datatable"><thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Roles</th><th></th></tr></thead>
+    <tbody>${all.map(u => `<tr>
+        <td>${esc(u.anonymous ? 'Anonymous' : u.displayName)}</td><td>${esc(u.email)}</td><td>${esc(u.phone || '')}</td>
+        <td>${u.isSuperadmin ? '⭐ Superadmin ' : ''}${u.isAdmin ? '🛡️ Admin ' : ''}${u.isStoreAdmin ? '☕ Store Admin' : ''}</td>
+        <td style="white-space:nowrap">
+          ${u.uid !== getProfile().uid ? `
+            <button class="small-link" onclick="window.__toggleFlag('${u.uid}','isAdmin',${!u.isAdmin})">${u.isAdmin ? 'Remove Admin' : 'Make Admin'}</button>
+            <button class="small-link" onclick="window.__toggleFlag('${u.uid}','isStoreAdmin',${!u.isStoreAdmin})">${u.isStoreAdmin ? 'Remove Store Admin' : 'Make Store Admin'}</button>
+            <button class="small-link" style="color:var(--red)" onclick="window.__removeMember('${u.uid}')">Remove</button>
+          ` : '<span style="font-size:11.5px;color:var(--ink-soft)">You</span>'}
+        </td></tr>`).join('') || `<tr><td colspan="5">No members yet.</td></tr>`}</tbody></table>
+  </div>`;
+}
+
+function renderAuditTab() {
+  const rows = auditLog.slice().sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)).slice(0, 100);
+  return `<div class="card" style="padding:6px 16px;overflow-x:auto">
+    <table class="datatable"><thead><tr><th>Who</th><th>Action</th><th>Detail</th></tr></thead>
+    <tbody>${rows.map(a => `<tr><td>${esc(a.actor)}</td><td>${esc(a.action)}</td><td>${esc(a.detail || '')}</td></tr>`).join('') || `<tr><td colspan="3" style="color:var(--ink-soft)">No activity logged yet.</td></tr>`}</tbody></table>
+  </div>`;
+}
+
+function wireTabHandlers() {
+  const newEventBtn = document.getElementById('newEventBtn');
+  if (newEventBtn) newEventBtn.onclick = () => {
+    showOverlay(`<div class="modal wide" style="position:relative">
+      <button class="close-x" onclick="closeOverlay()">✕</button>
+      <h2>Create event</h2>
+      <div class="form-row"><label>Title</label><input id="neTitle"></div>
+      <div class="form-row"><label>Date</label><input type="date" id="neDate"></div>
+      <div class="form-row"><label>Time</label><input id="neTime" placeholder="e.g. 9:00 AM"></div>
+      <div class="form-row"><label>Location</label><input id="neLoc"></div>
+      <div class="form-row"><label>Description</label><textarea id="neDesc" rows="3"></textarea></div>
+      <div class="form-row"><label>Divisions</label>
+        <div class="role-grid">${ECOSYSTEMS.map(e => `<button type="button" class="role-opt" data-div="${e.short}">${e.icon} ${e.name}</button>`).join('')}</div>
+      </div>
+      <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin-bottom:12px"><input type="checkbox" id="neSchoolwide" style="width:auto"> Schoolwide event (auto-tags LE + UE + MS + HS)</label>
+      <button class="btn btn-primary" style="width:100%" id="neSave">Create event</button>
+    </div>`);
+    document.querySelectorAll('#ovl .role-opt').forEach(b => b.onclick = () => b.classList.toggle('active'));
+    document.getElementById('neSave').onclick = async () => {
+      const title = document.getElementById('neTitle').value.trim();
+      const date = document.getElementById('neDate').value;
+      if (!title || !date) { toast('Title and date are required.'); return; }
+      const schoolwide = document.getElementById('neSchoolwide').checked;
+      const divisions = schoolwide ? ['LE', 'UE', 'MS', 'HS'] : [...document.querySelectorAll('#ovl .role-opt.active')].map(b => b.dataset.div);
+      try {
+        const ref = await addDoc(collection(db, 'events'), {
+          title, date, time: document.getElementById('neTime').value.trim(),
+          location: document.getElementById('neLoc').value.trim(),
+          description: document.getElementById('neDesc').value.trim(),
+          divisions, adminUids: [getProfile().uid], attachments: [], createdAt: serverTimestamp(),
+        });
+        await logAudit('Created event', title);
+        closeOverlay(); toast('Event created!');
+      } catch (e) { toast('Could not create event: ' + e.message); }
+    };
+  };
+
+  window.__deleteEvent = async (id) => {
+    if (!confirm('Delete this event? This cannot be undone.')) return;
+    try { await deleteDoc(doc(db, 'events', id)); await logAudit('Deleted event', id); toast('Event deleted.'); }
+    catch (e) { toast('Could not delete: ' + e.message); }
+  };
+
+  window.__verifyHours = async (id) => {
+    try { await updateDoc(doc(db, 'hours', id), { status: 'Verified' }); } catch (e) { toast('Could not verify: ' + e.message); }
+  };
+
+  window.__toggleFlag = async (uid, field, value) => {
+    if (!isSuperadmin()) { toast('Only a Superadmin can do this.'); return; }
+    if (!confirm(`${value ? 'Grant' : 'Remove'} ${field} for this member?`)) return;
+    try {
+      await updateDoc(doc(db, 'users', uid), { [field]: value });
+      await logAudit(`${value ? 'Granted' : 'Removed'} ${field}`, uid);
+      toast('Updated.');
+    } catch (e) { toast('Could not update: ' + e.message); }
+  };
+
+  window.__removeMember = async (uid) => {
+    if (!isSuperadmin()) { toast('Only a Superadmin can do this.'); return; }
+    if (!confirm('Remove this member? Their data will be archived first.')) return;
+    try {
+      const userSnap = await getDoc(doc(db, 'users', uid));
+      const userSignups = await getDocs(query(collection(db, 'signups'), where('uid', '==', uid)));
+      const userCafe = await getDocs(query(collection(db, 'cafeSignups'), where('uid', '==', uid)));
+      const userHours = await getDocs(query(collection(db, 'hours'), where('uid', '==', uid)));
+      await addDoc(collection(db, 'removedMemberArchive'), {
+        uid, profile: userSnap.exists() ? userSnap.data() : null,
+        signups: userSignups.docs.map(d => d.data()),
+        cafeSignups: userCafe.docs.map(d => d.data()),
+        hours: userHours.docs.map(d => d.data()),
+        removedBy: getProfile().displayName, removedAt: serverTimestamp(),
+      });
+      await deleteDoc(doc(db, 'users', uid));
+      await logAudit('Removed member', uid);
+      toast('Member archived and removed.');
+    } catch (e) { toast('Could not remove: ' + e.message); }
+  };
+}
+</script>
+</body>
+</html>
