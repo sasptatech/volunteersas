@@ -16,17 +16,28 @@
 <script type="module">
 import { watchAuth, getProfile } from "./js/auth.js";
 import { db, collection, query, where, onSnapshot, doc, getDoc, deleteDoc } from "./js/firebase-init.js";
-import { SHIFT_TYPES, fmtDayLabel } from "./js/cafe-dates.js";
+import { SHIFT_TYPES, fmtDayLabel, pad, dstr, mondayOf, weekDates, shiftWeek } from "./js/cafe-dates.js";
 import { toast, renderHeader, esc } from "./js/common.js";
 import { renderAddToCalendar } from "./js/calendar.js";
 
 const root = document.getElementById('root');
 let myEventSignups = [], myCafeSignups = [], mySlotSignups = [], myItemSignups = [], eventCache = {};
+let view = 'list'; // 'list' | 'calendar'
+let calSub = 'month'; // 'week' | 'month'
+let calWeekStart = mondayOf(dstr(new Date()));
+let calMonth = dstr(new Date()).slice(0, 7);
+
+const TYPE_META = {
+  event: { icon: '🔍', label: 'Event', color: '#0057B8' },
+  cafe: { icon: '☕', label: 'PTA Cafe', color: '#8B5E3C' },
+  slot: { icon: '🙋', label: 'Volunteer slot', color: '#7B3FA0' },
+  item: { icon: '🍽️', label: 'Bringing something', color: '#C9922B' },
+};
 
 watchAuth((profile, needsProfile) => {
   if (needsProfile) { location.href = 'index.html'; return; }
   renderHeader('schedule.html');
-  root.innerHTML = `<div class="section"><h1 class="serif" style="font-size:22px">My Schedule</h1><div id="list"><p style="color:var(--ink-soft)">Loading…</p></div></div>`;
+  root.innerHTML = `<div class="section"><p style="color:var(--ink-soft)">Loading…</p></div>`;
   watchData(profile.uid);
 }, () => { location.href = 'index.html'; });
 
@@ -59,22 +70,21 @@ function watchData(uid) {
   });
 }
 
-function render() {
-  const list = document.getElementById('list');
-  if (!list) return;
-  const items = [
-    ...myEventSignups.filter(s => eventCache[s.eventId]).map(s => ({
-      type: 'event', date: eventCache[s.eventId].date, id: s.id,
-      label: eventCache[s.eventId].title, sub: eventCache[s.eventId].location,
-      href: `event.html?id=${s.eventId}`, startTime: eventCache[s.eventId].time, location: eventCache[s.eventId].location,
-      description: eventCache[s.eventId].description,
-    })),
+function buildItems() {
+  return [
+    ...myEventSignups.filter(s => eventCache[s.eventId]).map(s => {
+      const ev = eventCache[s.eventId];
+      return {
+        type: 'event', date: ev.date, id: s.id, time: ev.time,
+        label: ev.title, href: `event.html?id=${s.eventId}`,
+        location: ev.location, description: ev.description,
+      };
+    }),
     ...myCafeSignups.map(s => {
       const st = SHIFT_TYPES.find(t => t.id === s.shift) || {};
       return {
-        type: 'cafe', date: s.date, id: s.id,
-        label: `PTA Cafe — ${st.label || s.shift}`,
-        sub: fmtDayLabel(s.date), href: 'cafe.html',
+        type: 'cafe', date: s.date, id: s.id, time: st.label || s.shift,
+        label: `PTA Cafe — ${st.label || s.shift}`, href: 'cafe.html',
         startTime: st.label ? st.label.split('–')[0].trim() : '9:00 AM', durationHrs: st.hrs,
         location: 'PTA Cafe, SAS', description: 'PTA Cafe volunteer shift.',
       };
@@ -83,36 +93,147 @@ function render() {
       const ev = eventCache[s.eventId];
       const g = (ev.slotGroups || []).find(x => x.id === s.slotGroupId) || {};
       return {
-        type: 'slot', date: ev.date, id: s.id,
-        label: `${ev.title} — ${g.label || 'slot'}`, sub: `${g.startTime || ''}–${g.endTime || ''}`,
+        type: 'slot', date: ev.date, id: s.id, time: `${g.startTime || ''}–${g.endTime || ''}`,
+        label: `${ev.title} — ${g.label || 'slot'}`,
         href: `event.html?id=${s.eventId}`, startTime: g.startTime, location: ev.location, description: ev.description,
       };
     }),
     ...myItemSignups.filter(s => eventCache[s.eventId]).map(s => {
       const ev = eventCache[s.eventId];
       return {
-        type: 'item', date: ev.date, id: s.id,
-        label: `${ev.title} — bringing "${s.item}"`, sub: ev.location,
+        type: 'item', date: ev.date, id: s.id, time: ev.time,
+        label: `${ev.title} — bringing "${s.item}"`,
         href: `event.html?id=${s.eventId}`, startTime: ev.time, location: ev.location, description: ev.description,
       };
     }),
   ].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+}
 
-  if (!items.length) { list.innerHTML = `<p style="color:var(--ink-soft)">Nothing on your schedule yet — visit Discover or PTA Cafe to sign up.</p>`; return; }
+function fmtDate(dateStr) {
+  if (!dateStr) return '';
+  return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
 
-  list.innerHTML = `<div class="grid">${items.map((it, i) => `
-    <div class="card" style="padding:14px">
-      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--ink-soft)">${it.type === 'cafe' ? '☕ PTA Cafe' : it.type === 'slot' ? '🙋 Volunteer slot' : it.type === 'item' ? '🍽️ Bringing something' : '🔍 Event'}</div>
+function render() {
+  const items = buildItems();
+  root.innerHTML = `<div class="section">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:16px">
+      <h1 class="serif" style="font-size:22px;margin:0">My Schedule</h1>
+      <div style="display:flex;gap:6px">
+        <button class="btn ${view === 'list' ? 'btn-primary' : 'btn-ghost'}" id="listViewBtn">📋 List</button>
+        <button class="btn ${view === 'calendar' ? 'btn-primary' : 'btn-ghost'}" id="calViewBtn">🗓 Calendar</button>
+      </div>
+    </div>
+    <div id="scheduleBody"></div>
+  </div>`;
+  document.getElementById('listViewBtn').onclick = () => { view = 'list'; render(); };
+  document.getElementById('calViewBtn').onclick = () => { view = 'calendar'; render(); };
+
+  const body = document.getElementById('scheduleBody');
+  body.innerHTML = view === 'calendar' ? renderCalendar(items) : renderList(items);
+  wireHandlers(items);
+}
+
+function renderList(items) {
+  if (!items.length) return `<p style="color:var(--ink-soft)">Nothing on your schedule yet — visit Discover or PTA Cafe to sign up.</p>`;
+  return `<div class="grid">${items.map((it, i) => {
+    const meta = TYPE_META[it.type];
+    return `<div class="card" style="padding:14px;border-left:4px solid ${meta.color}">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--ink-soft)">${meta.icon} ${meta.label}</div>
       <a href="${it.href}" style="display:block;margin:4px 0"><strong>${esc(it.label)}</strong></a>
-      <div style="font-size:12.5px;color:var(--ink-soft)">${esc(it.sub || '')}</div>
+      <div style="font-size:12.5px;color:var(--ink-soft)">📅 ${esc(fmtDate(it.date))}${it.time ? ' · 🕐 ' + esc(it.time) : ''}${it.location ? ' · 📍 ' + esc(it.location) : ''}</div>
       <div id="addCal-${i}"></div>
       <button class="small-link" style="color:var(--red);margin-top:8px" onclick="window.__cancelItem('${it.type}','${it.id}')">Cancel</button>
-    </div>`).join('')}</div>`;
+    </div>`;
+  }).join('')}</div>`;
+}
 
-  items.forEach((it, i) => renderAddToCalendar(`addCal-${i}`, {
-    title: it.label, date: it.date, startTime: it.startTime, durationHrs: it.durationHrs || 2,
-    location: it.location, description: it.description,
-  }));
+function renderCalendar(items) {
+  const toggle = `<div style="display:flex;gap:6px;margin-bottom:14px">
+    <button class="btn ${calSub === 'week' ? 'btn-primary' : 'btn-ghost'}" id="calWeekBtn">Week</button>
+    <button class="btn ${calSub === 'month' ? 'btn-primary' : 'btn-ghost'}" id="calMonthBtn">Month</button>
+  </div>`;
+  return toggle + (calSub === 'week' ? renderCalWeek(items) : renderCalMonth(items));
+}
+
+function itemsOnDate(items, dateStr) { return items.filter(it => it.date === dateStr); }
+
+function renderCalWeek(items) {
+  const monday = calWeekStart;
+  const days = [];
+  const d0 = new Date(monday + 'T00:00:00');
+  for (let i = 0; i < 7; i++) { const d = new Date(d0); d.setDate(d.getDate() + i); days.push(dstr(d)); }
+  const label = `${fmtDate(days[0])} – ${fmtDate(days[6])}`;
+  let out = `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+    <button class="btn btn-ghost" id="prevWeekBtn">‹ Prev</button>
+    <div style="font-weight:700;font-family:'Source Serif 4',serif">${label}</div>
+    <button class="btn btn-ghost" id="nextWeekBtn">Next ›</button>
+  </div><div class="grid">`;
+  days.forEach(dateStr => {
+    const dayItems = itemsOnDate(items, dateStr);
+    out += `<div class="card" style="padding:14px">
+      <div style="font-weight:700;margin-bottom:8px">${fmtDate(dateStr)}</div>
+      ${!dayItems.length ? `<div style="font-size:12px;color:var(--ink-soft)">Nothing scheduled</div>` :
+        dayItems.map(it => {
+          const meta = TYPE_META[it.type];
+          return `<a href="${it.href}" style="display:block;padding:5px 8px;margin-bottom:5px;border-radius:7px;background:${meta.color}15;color:${meta.color};font-size:12.5px;font-weight:600">${meta.icon} ${esc(it.label)}${it.time ? ' · ' + esc(it.time) : ''}</a>`;
+        }).join('')}
+    </div>`;
+  });
+  out += `</div>`;
+  return out;
+}
+
+function renderCalMonth(items) {
+  const [y, m] = calMonth.split('-').map(Number);
+  const first = new Date(y, m - 1, 1);
+  const startPad = first.getDay(); // 0=Sun
+  const gridStart = new Date(first); gridStart.setDate(gridStart.getDate() - startPad);
+  const label = first.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  let out = `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+    <button class="btn btn-ghost" id="prevMonthBtn">‹ Prev</button>
+    <div style="font-weight:700;font-family:'Source Serif 4',serif">${label}</div>
+    <button class="btn btn-ghost" id="nextMonthBtn">Next ›</button>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px">${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => `<div style="font-size:11px;font-weight:700;text-align:center;color:var(--ink-soft)">${d}</div>`).join('')}</div>`;
+  for (let w = 0; w < 6; w++) {
+    const rowDates = [];
+    for (let i = 0; i < 7; i++) { const d = new Date(gridStart); d.setDate(d.getDate() + w * 7 + i); rowDates.push(dstr(d)); }
+    if (rowDates.every(dt => dt.slice(0, 7) !== calMonth) && w > 0) continue;
+    out += `<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px">
+      ${rowDates.map(dt => {
+        const inMonth = dt.slice(0, 7) === calMonth;
+        const dayItems = itemsOnDate(items, dt);
+        const dayNum = +dt.slice(8, 10);
+        return `<div style="min-height:64px;border:1px solid var(--line);border-radius:8px;padding:5px;opacity:${inMonth ? 1 : .35}">
+          <div style="font-size:11px;font-weight:700;color:var(--ink-soft)">${dayNum}</div>
+          ${dayItems.slice(0, 2).map(it => `<a href="${it.href}" style="display:block;font-size:10px;padding:2px 4px;margin-top:2px;border-radius:4px;background:${TYPE_META[it.type].color}20;color:${TYPE_META[it.type].color};font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${TYPE_META[it.type].icon} ${esc(it.label)}</a>`).join('')}
+          ${dayItems.length > 2 ? `<div style="font-size:9.5px;color:var(--ink-soft);margin-top:2px">+${dayItems.length - 2} more</div>` : ''}
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
+  return out;
+}
+
+function wireHandlers(items) {
+  if (view === 'list') {
+    items.forEach((it, i) => renderAddToCalendar(`addCal-${i}`, {
+      title: it.label, date: it.date, startTime: it.startTime || it.time, durationHrs: it.durationHrs || 2,
+      location: it.location, description: it.description,
+    }));
+  } else {
+    const weekBtn = document.getElementById('calWeekBtn'); if (weekBtn) weekBtn.onclick = () => { calSub = 'week'; render(); };
+    const monthBtn = document.getElementById('calMonthBtn'); if (monthBtn) monthBtn.onclick = () => { calSub = 'month'; render(); };
+    const prevWeek = document.getElementById('prevWeekBtn'); if (prevWeek) prevWeek.onclick = () => { calWeekStart = shiftWeek(calWeekStart, -1); render(); };
+    const nextWeek = document.getElementById('nextWeekBtn'); if (nextWeek) nextWeek.onclick = () => { calWeekStart = shiftWeek(calWeekStart, 1); render(); };
+    const prevMonth = document.getElementById('prevMonthBtn'); if (prevMonth) prevMonth.onclick = () => {
+      const [y, m] = calMonth.split('-').map(Number); const d = new Date(y, m - 2, 1); calMonth = d.getFullYear() + '-' + pad(d.getMonth() + 1); render();
+    };
+    const nextMonth = document.getElementById('nextMonthBtn'); if (nextMonth) nextMonth.onclick = () => {
+      const [y, m] = calMonth.split('-').map(Number); const d = new Date(y, m, 1); calMonth = d.getFullYear() + '-' + pad(d.getMonth() + 1); render();
+    };
+  }
 }
 
 window.__cancelItem = async (type, id) => {

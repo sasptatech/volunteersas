@@ -222,7 +222,7 @@ function wireBodyHandlers(storeAdmin) {
       try {
         const hoursRef = await addDoc(collection(db, 'hours'), {
           uid: getProfile().uid, volunteer: getProfile().displayName, event: 'PTA Cafe — ' + st.label,
-          eco: 'cafe', date, hrs: st.hrs, status: 'Pending', createdAt: serverTimestamp(),
+          eco: 'cafe', date, hrs: st.hrs, createdAt: serverTimestamp(),
         });
         await addDoc(collection(db, 'cafeSignups'), {
           date, shift, uid: getProfile().uid, name: getProfile().displayName, comment, overflow: false, hoursId: hoursRef.id, createdAt: serverTimestamp(),

@@ -23,6 +23,7 @@ import { toast, showOverlay, closeOverlay, bubbleRowHtml, esc, renderHeader } fr
 import { renderChatPanel } from "./js/chat.js";
 import { renderAddToCalendar } from "./js/calendar.js";
 import { rteHtml, rteValue } from "./js/rte.js";
+import { MAPPEDIN_LOCATIONS, mappedinLocationUrl, findMappedinLocation } from "./js/mappedin-locations.js";
 
 const root = document.getElementById('root');
 const params = new URLSearchParams(location.search);
@@ -84,7 +85,7 @@ function render() {
       ${editing ? renderEditForm() : `
         <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--ink-soft)">${(ev.divisions || []).map(id => (ECOSYSTEMS.find(e => e.id === id) || {}).short || id).join(', ')}</div>
         <h1 class="serif" style="font-size:24px;margin:6px 0">${esc(ev.title || 'Untitled event')}</h1>
-        <div style="font-size:13.5px;color:var(--ink-soft);margin-bottom:14px">📅 ${esc(ev.date || '')} ${ev.time ? '· ' + esc(ev.time) : ''} · 📍 ${esc(ev.location || '')}</div>
+        <div style="font-size:13.5px;color:var(--ink-soft);margin-bottom:14px">📅 ${esc(ev.date || '')} ${ev.time ? '· ' + esc(ev.time) : ''} · 📍 ${renderLocation()}</div>
         <div style="font-size:14px;line-height:1.6">${ev.description || ''}</div>
       `}
       ${isAdminHere && !editing ? `<button class="btn btn-ghost" style="margin-top:10px" id="editBtn">✏️ Edit event</button>` : ''}
@@ -100,10 +101,6 @@ function render() {
     ${(ev.photos || []).length ? `<div class="card" style="padding:18px;margin-top:16px">
       <h3 style="margin-top:0">📷 Photos</h3>
       <div class="grid">${(ev.photos || []).map(url => `<div class="card" style="overflow:hidden;padding:0"><img src="${esc(url)}" style="width:100%;display:block"></div>`).join('')}</div>
-    </div>` : ''}
-
-    ${ev.location ? `<div class="card" style="padding:0;margin-top:16px;overflow:hidden">
-      <iframe src="https://web.mappedin.com/singapore-american-school/singapore-american-school.html#/" style="width:100%;height:340px;border:0" allow="clipboard-write 'self'; web-share 'self'"></iframe>
     </div>` : ''}
 
     <div class="card" style="padding:18px;margin-top:16px">
@@ -129,6 +126,15 @@ function render() {
   });
   wireHandlers(isAdminHere);
   if (isAdminHere) loadCoAdminPicker();
+}
+
+function renderLocation() {
+  if (ev.mappedinLocationId) {
+    const loc = findMappedinLocation(ev.mappedinLocationId);
+    const label = loc ? loc.name : (ev.location || 'View on map');
+    return `<a href="${mappedinLocationUrl(ev.mappedinLocationId)}" target="_blank" class="small-link">${esc(label)} ↗</a>`;
+  }
+  return esc(ev.location || '');
 }
 
 function renderParticipationSection(isAdminHere) {
@@ -224,6 +230,10 @@ function renderEditForm() {
     <div class="form-row"><label>Date</label><input id="edDate" type="date" value="${esc(ev.date || '')}"></div>
     <div class="form-row"><label>Time</label><input id="edTime" value="${esc(ev.time || '')}" placeholder="e.g. 9:00 AM"></div>
     <div class="form-row"><label>Location</label><input id="edLoc" value="${esc(ev.location || '')}"></div>
+    <div class="form-row"><label>SAS Mappedin location (optional — type to search)</label>
+      <input list="mappedinDatalist" id="edMappedin" value="${ev.mappedinLocationId ? esc((findMappedinLocation(ev.mappedinLocationId) || {}).name || '') : ''}" placeholder="Start typing a room/location name…">
+      <datalist id="mappedinDatalist">${MAPPEDIN_LOCATIONS.map(l => `<option value="${esc(l.name)}">`).join('')}</datalist>
+    </div>
     <div class="form-row"><label>Description</label>${rteHtml('edDescRTE', ev.description || '')}</div>
     <div class="form-row"><label>Add attachments</label><input type="file" id="edAttachments" multiple></div>
     <div class="form-row"><label>Add photos</label><input type="file" id="edPhotos" multiple accept="image/*"></div>
@@ -249,6 +259,7 @@ function wireHandlers(isAdminHere) {
         date: document.getElementById('edDate').value,
         time: document.getElementById('edTime').value.trim(),
         location: document.getElementById('edLoc').value.trim(),
+        mappedinLocationId: (MAPPEDIN_LOCATIONS.find(l => l.name === document.getElementById('edMappedin').value.trim()) || {}).id || null,
         description: rteValue('edDescRTE'),
         divisions,
       });
