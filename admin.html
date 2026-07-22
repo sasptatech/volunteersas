@@ -74,7 +74,7 @@ function renderEventsTab() {
   return `
     <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
       <button class="btn btn-primary" id="newEventBtn">+ Create event</button>
-      ${isSuperadmin() ? `<button class="btn btn-ghost" id="seedBtn">🌱 Seed test events</button>` : ''}
+      ${isSuperadmin() ? `<button class="btn btn-ghost" id="seedBtn">🌱 Seed real PTA events</button>` : ''}
     </div>
     <div class="grid">${mine.map(e => `
       <div class="card" style="padding:14px">
@@ -271,20 +271,22 @@ function wireTabHandlers() {
 
   const seedBtn = document.getElementById('seedBtn');
   if (seedBtn) seedBtn.onclick = async () => {
-    if (!confirm('Create 5 sample test events?')) return;
+    if (!confirm('Create the 7 real PTA events for the year?')) return;
     const samples = [
-      { title: 'Storytime Helpers', date: '2026-08-17', time: '9:00 AM', location: 'LE Library', description: 'Read aloud to our youngest learners.', divisions: ['le'] },
-      { title: 'Reading Buddies', date: '2026-08-18', time: '9:30 AM', location: 'UE Library', description: 'Pair up with a student for reading practice.', divisions: ['ue'] },
-      { title: 'Drama Crew', date: '2026-08-19', time: '3:00 PM', location: 'MS Theatre', description: 'Help backstage for the fall production.', divisions: ['ms'] },
-      { title: 'College Prep Workshop', date: '2026-08-20', time: '1:00 PM', location: 'HS Career Center', description: 'Support seniors with application materials.', divisions: ['hs'] },
-      { title: 'Sports Day', date: '2026-08-21', time: '8:00 AM', location: 'Athletic Field', description: 'Schoolwide field day — all hands welcome.', divisions: ['le', 'ue', 'ms', 'hs'] },
+      { title: 'Welcome Day Popsicles (PTA Cafe)', date: '2026-08-07', time: '10:00 AM – 3:00 PM', location: 'PTA Cafe', description: 'Kick off the school year at the PTA Cafe! On the first Friday back, volunteers hand out free welcome-back popsicles to students and families, help newcomers find their way around campus, and give the returning community a warm hello. This is the first PTA Cafe volunteer day of the year — a relaxed, friendly way to meet other parents and get a feel for how the Cafe runs. No experience needed, just a smile and a couple of hours to spare.', divisions: ['le', 'ue', 'ms', 'hs'], type: 'volunteer_slots', slotGroups: [{ id: 'main', label: 'Volunteers needed', startTime: '10:00 AM', endTime: '3:00 PM', capacity: 6 }] },
+      { title: 'The Great Eagle Kickoff', date: '2026-08-15', time: '9:00 AM – 1:00 PM', location: 'MPH, Bus Bay, Lower Elementary Playground, Stadium Field', description: 'Our biggest start-of-year community celebration. The Great Eagle Kickoff brings the whole SAS family together for a morning of Lower Elementary playdates, community-fair booths, games, food and activities across the MPH, Bus Bay, Lower Elementary Playground and Stadium Field. We need a large crew of volunteers to set up, run booths and activity stations, welcome families, and help pack down at the end. Come be part of the event that sets the tone for the whole year — perfect for anyone who wants to jump in and meet people fast.', divisions: ['le', 'ue', 'ms', 'hs'], type: 'volunteer_slots', slotGroups: [{ id: 'main', label: 'Volunteers needed', startTime: '9:00 AM', endTime: '1:00 PM', capacity: 40 }] },
+      { title: 'Welcome Back Social — High School', date: '2026-09-01', time: '6:30 PM – 9:00 PM', location: 'American Club', description: 'An evening for High School parents to reconnect and welcome families new to the community. Join fellow HS parents at the American Club for drinks, conversation and a chance to meet the people behind the PTA. A relaxed, no-agenda night to start the year off well. RSVP so we know to expect you.', divisions: ['hs'], type: 'standard' },
+      { title: 'Welcome Back Social — Upper Elementary (G3–5)', date: '2026-09-03', time: '6:30 PM – 9:00 PM', location: 'American Club', description: 'Upper Elementary parents (Grades 3–5) are invited to an evening social at the American Club. Catch up with familiar faces, welcome families new to the division, and connect with your child\'s grade community over drinks and conversation. A warm, casual way to kick off the year. RSVP to reserve your spot.', divisions: ['ue'], type: 'standard' },
+      { title: 'Room Parent Training', date: '2026-09-09', time: '10:00 AM – 12:00 PM', location: 'MPH', description: 'Signing up to be a room parent this year? This session walks through everything you need — your role, how to communicate with teachers and families, how class events and celebrations come together, and the support the PTA provides along the way. Whether you\'re a first-time room parent or a returning pro, you\'ll leave feeling ready and connected to your grade team. RSVP so we can prepare materials for everyone attending.', divisions: ['le', 'ue', 'ms', 'hs'], type: 'standard' },
+      { title: 'Welcome Back Social — Middle School', date: '2026-09-10', time: '6:30 PM – 9:00 PM', location: 'American Club', description: 'Middle School parents, come reconnect at the American Club. Meet other MS families, welcome newcomers to the division, and get the year started in good company. Relaxed and social — RSVP to let us know you\'re coming.', divisions: ['ms'], type: 'standard' },
+      { title: 'Welcome Back Social — Lower Elementary (ELC–G2)', date: '2026-09-15', time: '6:30 PM – 9:00 PM', location: 'American Club', description: 'A welcome-back evening for Lower Elementary families — Early Learning through Grade 2. Join other parents at the American Club to meet your child\'s grade community, welcome families new to SAS, and settle into the new year together. RSVP to save your place.', divisions: ['le'], type: 'standard' }
     ];
     try {
       for (const s of samples) {
         await addDoc(collection(db, 'events'), { ...s, adminUids: [getProfile().uid], createdAt: serverTimestamp() });
       }
       await logAudit('Seeded test events', `${samples.length} events`);
-      toast('5 test events created.');
+      toast(samples.length + ' real events created.');
     } catch (e) { toast('Could not seed: ' + e.message); }
   };
 
