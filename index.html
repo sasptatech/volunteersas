@@ -16,7 +16,7 @@
 <script type="module">
 import {
   watchAuth, googleSignIn, emailSignUp, emailSignIn, completeProfile,
-  getProfile, ECOSYSTEMS, TERMS_TEXT, COMMUNITY_NORMS_SUMMARY
+  getProfile, ECOSYSTEMS, TERMS_TEXT, COMMUNITY_NORMS_SUMMARY, signOutUser
 } from "./js/auth.js";
 import { toast, showOverlay, closeOverlay, bubbleRowHtml, esc, renderHeader } from "./js/common.js";
 import { db, collection, onSnapshot, query, orderBy } from "./js/firebase-init.js";
@@ -81,7 +81,8 @@ function renderJoinStep() {
         <div class="role-grid">${ECOSYSTEMS.map(e=>`<button type="button" class="role-opt ${d.divisions.includes(e.id)?'active':''}" data-div="${e.id}">${e.icon} ${e.name}</button>`).join('')}</div>
       </div>
       <div class="form-row"><label style="display:flex;align-items:center;gap:8px;font-weight:600"><input type="checkbox" id="jAnon" style="width:auto" ${d.anonymous?'checked':''}> Keep my details anonymous to other volunteers</label></div>
-      <button class="btn btn-primary" style="width:100%" id="joinNext">Continue</button>`;
+      <button class="btn btn-primary" style="width:100%" id="joinNext">Continue</button>
+      <button class="btn btn-ghost" style="width:100%;margin-top:8px" id="joinCancelBtn">Back</button>`;
   } else {
     body = `
       <div class="form-row"><label>Status (optional — shown on your profile, editable anytime)</label><textarea id="jStatus" rows="2" placeholder="e.g. Happy to help with Sports Day!">${esc(d.status)}</textarea></div>
@@ -114,6 +115,11 @@ function renderJoinStep() {
       d.anonymous = document.getElementById('jAnon').checked;
       if (!d.displayName) { toast('Please enter a display name.'); return; }
       joinStep = 2; renderJoinStep();
+    };
+    document.getElementById('joinCancelBtn').onclick = async () => {
+      await signOutUser();
+      joinStep = 1; joinDraft = { displayName:'', phone:'', divisions:[], anonymous:false, status:'', agreed:false };
+      renderAuthGate();
     };
   } else {
     document.getElementById('joinBack').onclick = () => { joinStep = 1; renderJoinStep(); };

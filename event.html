@@ -27,7 +27,7 @@ import { rteHtml, rteValue } from "./js/rte.js";
 const root = document.getElementById('root');
 const params = new URLSearchParams(location.search);
 const eventId = params.get('id');
-let ev = null, signups = [], usersCache = {}, editing = false;
+let ev = null, signups = [], slotSignups = [], itemSignups = [], usersCache = {}, editing = false;
 
 if (!eventId) { root.innerHTML = `<div class="section"><p>No event specified.</p></div>`; }
 
@@ -50,6 +50,14 @@ function loadEvent() {
   onSnapshot(query(collection(db, 'signups'), where('eventId', '==', eventId)), snap => {
     signups = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     hydrateUsers();
+  });
+  onSnapshot(query(collection(db, 'eventSlotSignups'), where('eventId', '==', eventId)), snap => {
+    slotSignups = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    render();
+  });
+  onSnapshot(query(collection(db, 'eventItemSignups'), where('eventId', '==', eventId)), snap => {
+    itemSignups = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    render();
   });
 }
 
@@ -82,17 +90,7 @@ function render() {
       ${isAdminHere && !editing ? `<button class="btn btn-ghost" style="margin-top:10px" id="editBtn">✏️ Edit event</button>` : ''}
     </div>
 
-    <div class="card" style="padding:18px;margin-top:16px">
-      <h3 style="margin-top:0">Who's going (${attendees.length})</h3>
-      ${bubbleRowHtml(attendees, 20)}
-      ${isAdminHere ? renderAttendeeAdminList(attendees) : ''}
-      <div style="margin-top:14px">
-        ${mySignup()
-          ? `<button class="btn btn-ghost" id="unrsvpBtn">Un-RSVP</button>`
-          : `<button class="btn btn-primary" id="rsvpBtn">RSVP</button>`}
-      </div>
-      <div id="addCalEvent"></div>
-    </div>
+    ${renderParticipationSection(isAdminHere)}
 
     ${(ev.attachments || []).length ? `<div class="card" style="padding:18px;margin-top:16px">
       <h3 style="margin-top:0">📎 Attachments</h3>
@@ -133,6 +131,79 @@ function render() {
   if (isAdminHere) loadCoAdminPicker();
 }
 
+function renderParticipationSection(isAdminHere) {
+  const type = ev.type || 'standard';
+  if (type === 'save_the_date') {
+    return `<div class="card" style="padding:18px;margin-top:16px">
+      <p style="color:var(--ink-soft);font-size:13.5px;margin:0">📌 Save the date — sign-ups aren't open yet. Check back for details.</p>
+      <div id="addCalEvent"></div>
+    </div>`;
+  }
+  if (type === 'volunteer_slots') return renderSlotGroupsSection(isAdminHere);
+  if (type === 'item_signup') return renderItemCategoriesSection(isAdminHere);
+
+  const attendees = signups.map(s => usersCache[s.uid]).filter(Boolean);
+  return `<div class="card" style="padding:18px;margin-top:16px">
+    <h3 style="margin-top:0">Who's going (${attendees.length})</h3>
+    ${bubbleRowHtml(attendees, 20)}
+    ${isAdminHere ? renderAttendeeAdminList(attendees) : ''}
+    <div style="margin-top:14px">
+      ${mySignup()
+        ? `<button class="btn btn-ghost" id="unrsvpBtn">Un-RSVP</button>`
+        : `<button class="btn btn-primary" id="rsvpBtn">RSVP</button>`}
+    </div>
+    <div id="addCalEvent"></div>
+  </div>`;
+}
+
+function renderSlotGroupsSection(isAdminHere) {
+  const groups = ev.slotGroups || [];
+  return `<div class="card" style="padding:18px;margin-top:16px">
+    <h3 style="margin-top:0">Volunteer slots</h3>
+    ${!groups.length ? `<p style="color:var(--ink-soft);font-size:13px">No slots have been set up yet.</p>` : groups.map(g => {
+      const filled = slotSignups.filter(s => s.slotGroupId === g.id);
+      const spotsLeft = g.capacity - filled.length;
+      let rows = filled.map(s => `<div style="font-size:12.5px;padding:4px 0;display:flex;justify-content:space-between">
+          <span><strong>${esc(s.name)}</strong>${s.comment ? ` — <span style="color:var(--ink-soft)">${esc(s.comment)}</span>` : ''}</span>
+          ${s.uid === getProfile().uid || isAdminHere ? `<button class="small-link" style="color:var(--red)" onclick="window.__removeSlotSignup('${s.id}')">Remove</button>` : ''}
+        </div>`).join('');
+      for (let i = 0; i < spotsLeft; i++) rows += `<div style="font-size:12.5px;padding:4px 0;color:var(--ink-soft)">Open slot — <button class="small-link" onclick="window.__openSlotSignup('${g.id}')">Sign up</button></div>`;
+      return `<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="font-weight:600;font-size:13.5px">${esc(g.label)} <span style="color:var(--ink-soft);font-weight:400">(${esc(g.startTime)}–${esc(g.endTime)})</span></span>
+          <span class="chip" style="background:${spotsLeft<=0?'#E3F3EC':'#FDF1D8'};color:${spotsLeft<=0?'#0E8A6D':'#96721E'}">${spotsLeft<=0?'Full':spotsLeft+' open'}</span>
+        </div>
+        <div style="margin-top:6px">${rows}</div>
+      </div>`;
+    }).join('')}
+    <div id="addCalEvent"></div>
+  </div>`;
+}
+
+function renderItemCategoriesSection(isAdminHere) {
+  const cats = ev.itemCategories || [];
+  return `<div class="card" style="padding:18px;margin-top:16px">
+    <h3 style="margin-top:0">What to bring</h3>
+    ${!cats.length ? `<p style="color:var(--ink-soft);font-size:13px">No items have been requested yet.</p>` : cats.map(c => {
+      const signed = itemSignups.filter(s => s.categoryId === c.id);
+      const spotsLeft = c.quota - signed.length;
+      let rows = signed.map(s => `<div style="font-size:12.5px;padding:4px 0;display:flex;justify-content:space-between">
+          <span><strong>${esc(s.name)}</strong> — ${esc(s.item)}</span>
+          ${s.uid === getProfile().uid || isAdminHere ? `<button class="small-link" style="color:var(--red)" onclick="window.__removeItemSignup('${s.id}')">Remove</button>` : ''}
+        </div>`).join('');
+      return `<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="font-weight:600;font-size:13.5px">${esc(c.label)}</span>
+          <span class="chip" style="background:${spotsLeft<=0?'#E3F3EC':'#FDF1D8'};color:${spotsLeft<=0?'#0E8A6D':'#96721E'}">${signed.length}/${c.quota} claimed</span>
+        </div>
+        <div style="margin-top:6px">${rows}</div>
+        ${spotsLeft > 0 ? `<button class="btn btn-ghost" style="width:100%;margin-top:8px;font-size:12.5px" onclick="window.__openItemSignup('${c.id}')">+ Sign up to bring something</button>` : ''}
+      </div>`;
+    }).join('')}
+    <div id="addCalEvent"></div>
+  </div>`;
+}
+
 function renderAttendeeAdminList(attendees) {
   return `<div style="margin-top:10px;border-top:1px solid var(--line);padding-top:10px">
     ${signups.map(s => {
@@ -146,7 +217,9 @@ function renderAttendeeAdminList(attendees) {
 }
 
 function renderEditForm() {
+  const typeLabels = { standard: 'Standard (RSVP)', save_the_date: 'Save the Date', volunteer_slots: 'Volunteer Slots', item_signup: 'Item Sign-up' };
   return `
+    <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px">Event type: <strong>${typeLabels[ev.type || 'standard']}</strong> (set at creation, can't be changed here)</div>
     <div class="form-row"><label>Title</label><input id="edTitle" value="${esc(ev.title || '')}"></div>
     <div class="form-row"><label>Date</label><input id="edDate" type="date" value="${esc(ev.date || '')}"></div>
     <div class="form-row"><label>Time</label><input id="edTime" value="${esc(ev.time || '')}" placeholder="e.g. 9:00 AM"></div>
@@ -220,6 +293,58 @@ function wireHandlers(isAdminHere) {
       });
       toast('Removed and notified.');
     } catch (e) { toast('Could not remove: ' + e.message); }
+  };
+
+  window.__openSlotSignup = (slotGroupId) => {
+    const g = (ev.slotGroups || []).find(x => x.id === slotGroupId); if (!g) return;
+    showOverlay(`<div class="modal" style="position:relative">
+      <button class="close-x" onclick="closeOverlay()">✕</button>
+      <h2>Sign up — ${esc(g.label)}</h2>
+      <p style="font-size:13.5px;color:var(--ink-soft)">${esc(g.startTime)}–${esc(g.endTime)}</p>
+      <div class="form-row"><label>Comment (optional)</label><textarea id="slotComment" rows="2"></textarea></div>
+      <button class="btn btn-primary" style="width:100%" id="confirmSlotSignup">Confirm</button>
+    </div>`);
+    document.getElementById('confirmSlotSignup').onclick = async () => {
+      const filled = slotSignups.filter(s => s.slotGroupId === slotGroupId);
+      if (filled.length >= g.capacity) { toast('That slot just filled.'); return; }
+      try {
+        await addDoc(collection(db, 'eventSlotSignups'), {
+          eventId, slotGroupId, uid: getProfile().uid, name: getProfile().displayName,
+          comment: document.getElementById('slotComment').value.trim(), createdAt: serverTimestamp(),
+        });
+        closeOverlay(); toast('Signed up!');
+      } catch (e) { toast('Could not sign up: ' + e.message); }
+    };
+  };
+  window.__removeSlotSignup = async (id) => {
+    try { await deleteDoc(doc(db, 'eventSlotSignups', id)); toast('Removed.'); }
+    catch (e) { toast('Could not remove: ' + e.message); }
+  };
+
+  window.__openItemSignup = (categoryId) => {
+    const c = (ev.itemCategories || []).find(x => x.id === categoryId); if (!c) return;
+    showOverlay(`<div class="modal" style="position:relative">
+      <button class="close-x" onclick="closeOverlay()">✕</button>
+      <h2>Sign up — ${esc(c.label)}</h2>
+      <div class="form-row"><label>What are you bringing?</label><input id="itemDesc" placeholder="e.g. Chocolate chip cookies"></div>
+      <button class="btn btn-primary" style="width:100%" id="confirmItemSignup">Confirm</button>
+    </div>`);
+    document.getElementById('confirmItemSignup').onclick = async () => {
+      const item = document.getElementById('itemDesc').value.trim();
+      if (!item) { toast('Please say what you\'re bringing.'); return; }
+      const signed = itemSignups.filter(s => s.categoryId === categoryId);
+      if (signed.length >= c.quota) { toast('This category is already full.'); return; }
+      try {
+        await addDoc(collection(db, 'eventItemSignups'), {
+          eventId, categoryId, uid: getProfile().uid, name: getProfile().displayName, item, createdAt: serverTimestamp(),
+        });
+        closeOverlay(); toast('Signed up!');
+      } catch (e) { toast('Could not sign up: ' + e.message); }
+    };
+  };
+  window.__removeItemSignup = async (id) => {
+    try { await deleteDoc(doc(db, 'eventItemSignups', id)); toast('Removed.'); }
+    catch (e) { toast('Could not remove: ' + e.message); }
   };
 
   const emailBtn = document.getElementById('emailAllBtn');

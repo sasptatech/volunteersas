@@ -123,6 +123,68 @@ function renderAuditTab() {
   </div>`;
 }
 
+function renderTypeExtra(type) {
+  const el = document.getElementById('neTypeExtra');
+  if (!el) return;
+  if (type === 'volunteer_slots') {
+    el.innerHTML = `<div class="form-row"><label>Volunteer slot groups</label>
+      <div id="slotGroupRows"></div>
+      <button type="button" class="btn btn-ghost" id="addSlotGroupBtn" style="margin-top:6px">+ Add slot group</button>
+    </div>`;
+    document.getElementById('addSlotGroupBtn').onclick = () => addSlotGroupRow();
+    addSlotGroupRow();
+  } else if (type === 'item_signup') {
+    el.innerHTML = `<div class="form-row"><label>Item categories needed</label>
+      <div id="itemCatRows"></div>
+      <button type="button" class="btn btn-ghost" id="addItemCatBtn" style="margin-top:6px">+ Add category</button>
+    </div>`;
+    document.getElementById('addItemCatBtn').onclick = () => addItemCatRow();
+    addItemCatRow();
+  } else {
+    el.innerHTML = '';
+  }
+}
+function addSlotGroupRow() {
+  const wrap = document.getElementById('slotGroupRows');
+  const row = document.createElement('div');
+  row.className = 'slot-row';
+  row.style.cssText = 'display:grid;grid-template-columns:2fr 1fr 1fr 1fr auto;gap:6px;margin-bottom:6px;align-items:center';
+  row.innerHTML = `
+    <input placeholder="Label (e.g. Decorating - MS)" class="sg-label">
+    <input placeholder="Start (e.g. 9:00 AM)" class="sg-start">
+    <input placeholder="End (e.g. 10:00 AM)" class="sg-end">
+    <input type="number" min="1" value="2" class="sg-cap">
+    <button type="button" class="btn btn-ghost" style="padding:6px 10px" onclick="this.parentElement.remove()">✕</button>`;
+  wrap.appendChild(row);
+}
+function readSlotGroupRows() {
+  return [...document.querySelectorAll('#slotGroupRows .slot-row')].map((row, i) => ({
+    id: 'sg' + i + '_' + Date.now(),
+    label: row.querySelector('.sg-label').value.trim(),
+    startTime: row.querySelector('.sg-start').value.trim(),
+    endTime: row.querySelector('.sg-end').value.trim(),
+    capacity: parseInt(row.querySelector('.sg-cap').value, 10) || 1,
+  })).filter(g => g.label);
+}
+function addItemCatRow() {
+  const wrap = document.getElementById('itemCatRows');
+  const row = document.createElement('div');
+  row.className = 'item-row';
+  row.style.cssText = 'display:grid;grid-template-columns:2fr 1fr auto;gap:6px;margin-bottom:6px;align-items:center';
+  row.innerHTML = `
+    <input placeholder="Category (e.g. Savory dish)" class="ic-label">
+    <input type="number" min="1" value="5" class="ic-quota">
+    <button type="button" class="btn btn-ghost" style="padding:6px 10px" onclick="this.parentElement.remove()">✕</button>`;
+  wrap.appendChild(row);
+}
+function readItemCategoryRows() {
+  return [...document.querySelectorAll('#itemCatRows .item-row')].map((row, i) => ({
+    id: 'ic' + i + '_' + Date.now(),
+    label: row.querySelector('.ic-label').value.trim(),
+    quota: parseInt(row.querySelector('.ic-quota').value, 10) || 1,
+  })).filter(c => c.label);
+}
+
 function wireTabHandlers() {
   const newEventBtn = document.getElementById('newEventBtn');
   if (newEventBtn) newEventBtn.onclick = () => {
@@ -133,7 +195,16 @@ function wireTabHandlers() {
       <div class="form-row"><label>Date</label><input type="date" id="neDate"></div>
       <div class="form-row"><label>Time</label><input id="neTime" placeholder="e.g. 9:00 AM"></div>
       <div class="form-row"><label>Location</label><input id="neLoc"></div>
+      <div class="form-row"><label>Event type</label>
+        <select id="neType">
+          <option value="standard">Standard (simple RSVP)</option>
+          <option value="save_the_date">Save the Date (no RSVP yet)</option>
+          <option value="volunteer_slots">Volunteer Slots (specific time slots)</option>
+          <option value="item_signup">Item Sign-up (e.g. potluck dishes)</option>
+        </select>
+      </div>
       <div class="form-row"><label>Description</label>${rteHtml('neDescRTE')}</div>
+      <div id="neTypeExtra"></div>
       <div class="form-row"><label>Attachments (documents — optional)</label><input type="file" id="neAttachments" multiple></div>
       <div class="form-row"><label>Photos (optional)</label><input type="file" id="neOwnPhotos" multiple accept="image/*"></div>
       <div class="form-row"><label>Divisions</label>
@@ -143,19 +214,28 @@ function wireTabHandlers() {
       <button class="btn btn-primary" style="width:100%" id="neSave">Create event</button>
     </div>`);
     document.querySelectorAll('#ovl .role-opt').forEach(b => b.onclick = () => b.classList.toggle('active'));
+    document.getElementById('neType').onchange = (e) => renderTypeExtra(e.target.value);
+    renderTypeExtra('standard');
+
     document.getElementById('neSave').onclick = async () => {
       const title = document.getElementById('neTitle').value.trim();
       const date = document.getElementById('neDate').value;
       if (!title || !date) { toast('Title and date are required.'); return; }
+      const type = document.getElementById('neType').value;
       const schoolwide = document.getElementById('neSchoolwide').checked;
       const divisions = schoolwide ? ECOSYSTEMS.map(e => e.id) : [...document.querySelectorAll('#ovl .role-opt.active')].map(b => b.dataset.div);
+      let description = rteValue('neDescRTE');
+      if (type === 'save_the_date' && !description.trim()) description = 'More details coming soon.';
+      const extra = {};
+      if (type === 'volunteer_slots') extra.slotGroups = readSlotGroupRows();
+      if (type === 'item_signup') extra.itemCategories = readItemCategoryRows();
       const saveBtn = document.getElementById('neSave');
       saveBtn.disabled = true; saveBtn.textContent = 'Creating…';
       try {
         const ref = await addDoc(collection(db, 'events'), {
           title, date, time: document.getElementById('neTime').value.trim(),
           location: document.getElementById('neLoc').value.trim(),
-          description: rteValue('neDescRTE'),
+          description, type, ...extra,
           divisions, adminUids: [getProfile().uid], attachments: [], photos: [], createdAt: serverTimestamp(),
         });
         const { storage } = await import("./js/firebase-init.js");

@@ -21,7 +21,7 @@ import { toast, renderHeader, esc } from "./js/common.js";
 import { renderAddToCalendar } from "./js/calendar.js";
 
 const root = document.getElementById('root');
-let myEventSignups = [], myCafeSignups = [], eventCache = {};
+let myEventSignups = [], myCafeSignups = [], mySlotSignups = [], myItemSignups = [], eventCache = {};
 
 watchAuth((profile, needsProfile) => {
   if (needsProfile) { location.href = 'index.html'; return; }
@@ -30,19 +30,31 @@ watchAuth((profile, needsProfile) => {
   watchData(profile.uid);
 }, () => { location.href = 'index.html'; });
 
+async function ensureEventCached(eventId) {
+  if (!eventCache[eventId]) {
+    const ed = await getDoc(doc(db, 'events', eventId));
+    if (ed.exists()) eventCache[eventId] = { id: ed.id, ...ed.data() };
+  }
+}
+
 function watchData(uid) {
   onSnapshot(query(collection(db, 'signups'), where('uid', '==', uid)), async snap => {
     myEventSignups = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    for (const s of myEventSignups) {
-      if (!eventCache[s.eventId]) {
-        const ed = await getDoc(doc(db, 'events', s.eventId));
-        if (ed.exists()) eventCache[s.eventId] = { id: ed.id, ...ed.data() };
-      }
-    }
+    for (const s of myEventSignups) await ensureEventCached(s.eventId);
     render();
   });
   onSnapshot(query(collection(db, 'cafeSignups'), where('uid', '==', uid)), snap => {
     myCafeSignups = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    render();
+  });
+  onSnapshot(query(collection(db, 'eventSlotSignups'), where('uid', '==', uid)), async snap => {
+    mySlotSignups = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    for (const s of mySlotSignups) await ensureEventCached(s.eventId);
+    render();
+  });
+  onSnapshot(query(collection(db, 'eventItemSignups'), where('uid', '==', uid)), async snap => {
+    myItemSignups = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    for (const s of myItemSignups) await ensureEventCached(s.eventId);
     render();
   });
 }
@@ -67,13 +79,30 @@ function render() {
         location: 'PTA Cafe, SAS', description: 'PTA Cafe volunteer shift.',
       };
     }),
+    ...mySlotSignups.filter(s => eventCache[s.eventId]).map(s => {
+      const ev = eventCache[s.eventId];
+      const g = (ev.slotGroups || []).find(x => x.id === s.slotGroupId) || {};
+      return {
+        type: 'slot', date: ev.date, id: s.id,
+        label: `${ev.title} — ${g.label || 'slot'}`, sub: `${g.startTime || ''}–${g.endTime || ''}`,
+        href: `event.html?id=${s.eventId}`, startTime: g.startTime, location: ev.location, description: ev.description,
+      };
+    }),
+    ...myItemSignups.filter(s => eventCache[s.eventId]).map(s => {
+      const ev = eventCache[s.eventId];
+      return {
+        type: 'item', date: ev.date, id: s.id,
+        label: `${ev.title} — bringing "${s.item}"`, sub: ev.location,
+        href: `event.html?id=${s.eventId}`, startTime: ev.time, location: ev.location, description: ev.description,
+      };
+    }),
   ].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
   if (!items.length) { list.innerHTML = `<p style="color:var(--ink-soft)">Nothing on your schedule yet — visit Discover or PTA Cafe to sign up.</p>`; return; }
 
   list.innerHTML = `<div class="grid">${items.map((it, i) => `
     <div class="card" style="padding:14px">
-      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--ink-soft)">${it.type === 'cafe' ? '☕ PTA Cafe' : '🔍 Event'}</div>
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--ink-soft)">${it.type === 'cafe' ? '☕ PTA Cafe' : it.type === 'slot' ? '🙋 Volunteer slot' : it.type === 'item' ? '🍽️ Bringing something' : '🔍 Event'}</div>
       <a href="${it.href}" style="display:block;margin:4px 0"><strong>${esc(it.label)}</strong></a>
       <div style="font-size:12.5px;color:var(--ink-soft)">${esc(it.sub || '')}</div>
       <div id="addCal-${i}"></div>
@@ -88,8 +117,9 @@ function render() {
 
 window.__cancelItem = async (type, id) => {
   if (!confirm('Cancel this commitment?')) return;
+  const coll = type === 'cafe' ? 'cafeSignups' : type === 'slot' ? 'eventSlotSignups' : type === 'item' ? 'eventItemSignups' : 'signups';
   try {
-    await deleteDoc(doc(db, type === 'cafe' ? 'cafeSignups' : 'signups', id));
+    await deleteDoc(doc(db, coll, id));
     toast('Cancelled.');
   } catch (e) { toast('Could not cancel: ' + e.message); }
 };
