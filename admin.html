@@ -50,7 +50,8 @@ async function logAudit(action, detail) {
 
 function render() {
   const tabs = [['events', '📅 Events'], ['hours', '⏱ Hours']];
-  if (isSuperadmin()) tabs.push(['members', '👥 Members'], ['audit', '🗒 Audit log']);
+  if (isAnyAdminTier()) tabs.push(['members', '👥 Members']);
+  if (isSuperadmin()) tabs.push(['audit', '🗒 Audit log']);
 
   root.innerHTML = `<div class="section">
     <h1 class="serif" style="font-size:22px">Admin</h1>
@@ -64,7 +65,7 @@ function render() {
   const body = document.getElementById('tabBody');
   if (tab === 'events') body.innerHTML = renderEventsTab();
   else if (tab === 'hours') body.innerHTML = renderHoursTab();
-  else if (tab === 'members' && isSuperadmin()) body.innerHTML = renderMembersTab();
+  else if (tab === 'members' && isAnyAdminTier()) body.innerHTML = renderMembersTab();
   else if (tab === 'audit' && isSuperadmin()) body.innerHTML = renderAuditTab();
   wireTabHandlers();
 }
@@ -74,7 +75,6 @@ function renderEventsTab() {
   return `
     <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
       <button class="btn btn-primary" id="newEventBtn">+ Create event</button>
-      ${isSuperadmin() ? `<button class="btn btn-ghost" id="seedBtn">🌱 Seed real PTA events</button>` : ''}
     </div>
     <div class="grid">${mine.map(e => `
       <div class="card" style="padding:14px">
@@ -97,18 +97,19 @@ function renderHoursTab() {
 
 function renderMembersTab() {
   const all = Object.values(users).sort((a, b) => (a.displayName || '').localeCompare(b.displayName || ''));
+  const iAmSuperadmin = isSuperadmin();
   return `<div class="card" style="padding:6px 16px;overflow-x:auto">
-    <table class="datatable"><thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Roles</th><th></th></tr></thead>
+    <table class="datatable"><thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Roles</th>${iAmSuperadmin ? '<th></th>' : ''}</tr></thead>
     <tbody>${all.map(u => `<tr>
         <td>${esc(u.anonymous ? 'Anonymous' : u.displayName)}</td><td>${esc(u.email)}</td><td>${esc(u.phone || '')}</td>
         <td>${u.isSuperadmin ? '⭐ Superadmin ' : ''}${u.isAdmin ? '🛡️ Admin ' : ''}${u.isStoreAdmin ? '☕ Store Admin' : ''}</td>
-        <td style="white-space:nowrap">
+        ${iAmSuperadmin ? `<td style="white-space:nowrap">
           ${u.uid !== getProfile().uid ? `
             <button class="small-link" onclick="window.__toggleFlag('${u.uid}','isAdmin',${!u.isAdmin})">${u.isAdmin ? 'Remove Admin' : 'Make Admin'}</button>
             <button class="small-link" onclick="window.__toggleFlag('${u.uid}','isStoreAdmin',${!u.isStoreAdmin})">${u.isStoreAdmin ? 'Remove Store Admin' : 'Make Store Admin'}</button>
             <button class="small-link" style="color:var(--red)" onclick="window.__removeMember('${u.uid}')">Remove</button>
           ` : '<span style="font-size:11.5px;color:var(--ink-soft)">You</span>'}
-        </td></tr>`).join('') || `<tr><td colspan="5">No members yet.</td></tr>`}</tbody></table>
+        </td>` : ''}</tr>`).join('') || `<tr><td colspan="${iAmSuperadmin ? 5 : 4}">No members yet.</td></tr>`}</tbody></table>
   </div>`;
 }
 
@@ -267,27 +268,6 @@ function wireTabHandlers() {
     if (!confirm('Delete this event? This cannot be undone.')) return;
     try { await deleteDoc(doc(db, 'events', id)); await logAudit('Deleted event', id); toast('Event deleted.'); }
     catch (e) { toast('Could not delete: ' + e.message); }
-  };
-
-  const seedBtn = document.getElementById('seedBtn');
-  if (seedBtn) seedBtn.onclick = async () => {
-    if (!confirm('Create the 7 real PTA events for the year?')) return;
-    const samples = [
-      { title: 'Welcome Day Popsicles (PTA Cafe)', date: '2026-08-07', time: '10:00 AM – 3:00 PM', location: 'PTA Cafe', description: 'Kick off the school year at the PTA Cafe! On the first Friday back, volunteers hand out free welcome-back popsicles to students and families, help newcomers find their way around campus, and give the returning community a warm hello. This is the first PTA Cafe volunteer day of the year — a relaxed, friendly way to meet other parents and get a feel for how the Cafe runs. No experience needed, just a smile and a couple of hours to spare.', divisions: ['le', 'ue', 'ms', 'hs'], type: 'volunteer_slots', slotGroups: [{ id: 'main', label: 'Volunteers needed', startTime: '10:00 AM', endTime: '3:00 PM', capacity: 6 }] },
-      { title: 'The Great Eagle Kickoff', date: '2026-08-15', time: '9:00 AM – 1:00 PM', location: 'MPH, Bus Bay, Lower Elementary Playground, Stadium Field', description: 'Our biggest start-of-year community celebration. The Great Eagle Kickoff brings the whole SAS family together for a morning of Lower Elementary playdates, community-fair booths, games, food and activities across the MPH, Bus Bay, Lower Elementary Playground and Stadium Field. We need a large crew of volunteers to set up, run booths and activity stations, welcome families, and help pack down at the end. Come be part of the event that sets the tone for the whole year — perfect for anyone who wants to jump in and meet people fast.', divisions: ['le', 'ue', 'ms', 'hs'], type: 'volunteer_slots', slotGroups: [{ id: 'main', label: 'Volunteers needed', startTime: '9:00 AM', endTime: '1:00 PM', capacity: 40 }] },
-      { title: 'Welcome Back Social — High School', date: '2026-09-01', time: '6:30 PM – 9:00 PM', location: 'American Club', description: 'An evening for High School parents to reconnect and welcome families new to the community. Join fellow HS parents at the American Club for drinks, conversation and a chance to meet the people behind the PTA. A relaxed, no-agenda night to start the year off well. RSVP so we know to expect you.', divisions: ['hs'], type: 'standard' },
-      { title: 'Welcome Back Social — Upper Elementary (G3–5)', date: '2026-09-03', time: '6:30 PM – 9:00 PM', location: 'American Club', description: 'Upper Elementary parents (Grades 3–5) are invited to an evening social at the American Club. Catch up with familiar faces, welcome families new to the division, and connect with your child\'s grade community over drinks and conversation. A warm, casual way to kick off the year. RSVP to reserve your spot.', divisions: ['ue'], type: 'standard' },
-      { title: 'Room Parent Training', date: '2026-09-09', time: '10:00 AM – 12:00 PM', location: 'MPH', description: 'Signing up to be a room parent this year? This session walks through everything you need — your role, how to communicate with teachers and families, how class events and celebrations come together, and the support the PTA provides along the way. Whether you\'re a first-time room parent or a returning pro, you\'ll leave feeling ready and connected to your grade team. RSVP so we can prepare materials for everyone attending.', divisions: ['le', 'ue', 'ms', 'hs'], type: 'standard' },
-      { title: 'Welcome Back Social — Middle School', date: '2026-09-10', time: '6:30 PM – 9:00 PM', location: 'American Club', description: 'Middle School parents, come reconnect at the American Club. Meet other MS families, welcome newcomers to the division, and get the year started in good company. Relaxed and social — RSVP to let us know you\'re coming.', divisions: ['ms'], type: 'standard' },
-      { title: 'Welcome Back Social — Lower Elementary (ELC–G2)', date: '2026-09-15', time: '6:30 PM – 9:00 PM', location: 'American Club', description: 'A welcome-back evening for Lower Elementary families — Early Learning through Grade 2. Join other parents at the American Club to meet your child\'s grade community, welcome families new to SAS, and settle into the new year together. RSVP to save your place.', divisions: ['le'], type: 'standard' }
-    ];
-    try {
-      for (const s of samples) {
-        await addDoc(collection(db, 'events'), { ...s, adminUids: [getProfile().uid], createdAt: serverTimestamp() });
-      }
-      await logAudit('Seeded test events', `${samples.length} events`);
-      toast(samples.length + ' real events created.');
-    } catch (e) { toast('Could not seed: ' + e.message); }
   };
 
   window.__removeHours = async (id) => {

@@ -42,6 +42,18 @@ function myAdminHere() {
   return ev && (isSuperadmin() || (ev.adminUids || []).includes(getProfile().uid));
 }
 
+async function notifyEventAdmins(message) {
+  const admins = (ev.adminUids || []).filter(uid => uid !== getProfile().uid);
+  for (const uid of admins) {
+    try {
+      await addDoc(collection(db, 'notifications'), {
+        to: uid, from: getProfile().displayName, subject: 'A sign-up was cancelled',
+        body: message, read: false, createdAt: serverTimestamp(),
+      });
+    } catch (e) { /* non-fatal */ }
+  }
+}
+
 function loadEvent() {
   onSnapshot(doc(db, 'events', eventId), snap => {
     if (!snap.exists()) { root.innerHTML = `<div class="section"><p>This event no longer exists.</p></div>`; return; }
@@ -292,7 +304,11 @@ function wireHandlers(isAdminHere) {
   const unrsvpBtn = document.getElementById('unrsvpBtn');
   if (unrsvpBtn) unrsvpBtn.onclick = async () => {
     const s = mySignup(); if (!s) return;
-    try { await deleteDoc(doc(db, 'signups', s.id)); toast('Un-RSVP\'d.'); } catch (e) { toast('Could not un-RSVP: ' + e.message); }
+    try {
+      await deleteDoc(doc(db, 'signups', s.id));
+      await notifyEventAdmins(`${getProfile().displayName} un-RSVP'd from "${ev.title}".`);
+      toast('Un-RSVP\'d.');
+    } catch (e) { toast('Could not un-RSVP: ' + e.message); }
   };
   window.__unrsvpOther = async (signupId, uid) => {
     if (!confirm('Un-RSVP this person from the event?')) return;
@@ -328,8 +344,15 @@ function wireHandlers(isAdminHere) {
     };
   };
   window.__removeSlotSignup = async (id) => {
-    try { await deleteDoc(doc(db, 'eventSlotSignups', id)); toast('Removed.'); }
-    catch (e) { toast('Could not remove: ' + e.message); }
+    const s = slotSignups.find(x => x.id === id);
+    try {
+      await deleteDoc(doc(db, 'eventSlotSignups', id));
+      if (s && s.uid === getProfile().uid) {
+        const g = (ev.slotGroups || []).find(x => x.id === s.slotGroupId) || {};
+        await notifyEventAdmins(`${getProfile().displayName} cancelled their "${g.label || 'slot'}" sign-up for "${ev.title}".`);
+      }
+      toast('Removed.');
+    } catch (e) { toast('Could not remove: ' + e.message); }
   };
 
   window.__openItemSignup = (categoryId) => {
@@ -354,8 +377,14 @@ function wireHandlers(isAdminHere) {
     };
   };
   window.__removeItemSignup = async (id) => {
-    try { await deleteDoc(doc(db, 'eventItemSignups', id)); toast('Removed.'); }
-    catch (e) { toast('Could not remove: ' + e.message); }
+    const s = itemSignups.find(x => x.id === id);
+    try {
+      await deleteDoc(doc(db, 'eventItemSignups', id));
+      if (s && s.uid === getProfile().uid) {
+        await notifyEventAdmins(`${getProfile().displayName} cancelled bringing "${s.item}" for "${ev.title}".`);
+      }
+      toast('Removed.');
+    } catch (e) { toast('Could not remove: ' + e.message); }
   };
 
   const emailBtn = document.getElementById('emailAllBtn');

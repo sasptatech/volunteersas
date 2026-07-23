@@ -254,9 +254,29 @@ function wireBodyHandlers(storeAdmin) {
     try {
       await deleteDoc(doc(db, 'cafeSignups', id));
       if (s.hoursId) { await deleteDoc(doc(db, 'hours', s.hoursId)).catch(() => {}); }
+      if (s.uid === getProfile().uid) await notifyStoreAdmins(s);
       toast('Shift removed.');
     } catch (e) { toast('Could not remove: ' + e.message); }
   };
+}
+
+async function notifyStoreAdmins(cancelledSignup) {
+  try {
+    const { getDocs } = await import("./js/firebase-init.js");
+    const snap = await getDocs(collection(db, 'users'));
+    const admins = snap.docs.map(d => ({ uid: d.id, ...d.data() })).filter(u => u.isStoreAdmin || u.isSuperadmin);
+    const st = SHIFT_TYPES.find(t => t.id === cancelledSignup.shift);
+    const label = st ? st.label : (cancelledSignup.message || cancelledSignup.shift);
+    for (const admin of admins) {
+      if (admin.uid === getProfile().uid) continue;
+      await addDoc(collection(db, 'notifications'), {
+        to: admin.uid, from: getProfile().displayName,
+        subject: 'A Cafe shift was cancelled',
+        body: `${getProfile().displayName} cancelled their ${fmtDayLabel(cancelledSignup.date)} shift (${label}).`,
+        read: false, createdAt: serverTimestamp(),
+      });
+    }
+  } catch (e) { /* non-fatal */ }
 }
 
 function promptDayOverride(status) {
@@ -280,18 +300,22 @@ function promptDayOverride(status) {
 function promptExtraSlot() {
   showOverlay(`<div class="modal" style="position:relative">
     <button class="close-x" onclick="closeOverlay()">✕</button>
-    <h2>Add extra slot</h2>
+    <h2>Add extra slot(s)</h2>
     <div class="form-row"><label>Date</label><input type="date" id="exDate"></div>
     <div class="form-row"><label>Message shown to volunteers</label><input id="exMsg" placeholder="e.g. Help with labeling new merchandise"></div>
-    <button class="btn btn-primary" style="width:100%" id="exSave">Add slot</button>
+    <div class="form-row"><label>How many slots?</label><input type="number" min="1" value="1" id="exQty"></div>
+    <button class="btn btn-primary" style="width:100%" id="exSave">Add slot(s)</button>
   </div>`);
   document.getElementById('exSave').onclick = async () => {
     const date = document.getElementById('exDate').value;
     const message = document.getElementById('exMsg').value.trim();
+    const qty = Math.max(1, parseInt(document.getElementById('exQty').value, 10) || 1);
     if (!date || !message) { toast('Please fill in both fields.'); return; }
     try {
-      await addDoc(collection(db, 'cafeSignups'), { date, shift: 'extra', overflow: true, message, uid: null, name: null, createdAt: serverTimestamp() });
-      closeOverlay(); toast('Extra slot added.');
+      for (let i = 0; i < qty; i++) {
+        await addDoc(collection(db, 'cafeSignups'), { date, shift: 'extra', overflow: true, message, uid: null, name: null, createdAt: serverTimestamp() });
+      }
+      closeOverlay(); toast(`${qty} extra slot${qty > 1 ? 's' : ''} added.`);
     } catch (e) { toast('Could not add: ' + e.message); }
   };
 }
