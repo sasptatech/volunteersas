@@ -31,11 +31,13 @@ const firebaseConfig = {
 
 export const app = initializeApp(firebaseConfig);
 
-// TODO: set this to your real reCAPTCHA v3 site key once registered
-// (Firebase console → App Check → register a web app → reCAPTCHA v3 provider).
-// App Check silently no-ops in local/dev if this isn't configured yet, so it's
-// safe to leave the placeholder in while we build.
-const RECAPTCHA_V3_SITE_KEY = "REPLACE_WITH_RECAPTCHA_V3_SITE_KEY";
+// reCAPTCHA v3 site key (public — safe to ship in client code). Registered at
+// google.com/recaptcha/admin for domains delightful-daifuku-1155c1.netlify.app
+// + localhost. The matching SECRET key lives only in the Firebase console
+// (App Check → reCAPTCHA v3 provider), never here.
+// Enforcement is enabled per-service in the Firebase console once App Check
+// monitoring shows real traffic is sending valid tokens.
+const RECAPTCHA_V3_SITE_KEY = "6LdO-mAtAAAAAOoh87fV-ZJLXbcPbA2Q8iUIaaR9";
 try {
   if (RECAPTCHA_V3_SITE_KEY && !RECAPTCHA_V3_SITE_KEY.startsWith("REPLACE")) {
     initializeAppCheck(app, {
