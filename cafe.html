@@ -20,7 +20,7 @@ import {
   serverTimestamp
 } from "./js/firebase-init.js";
 import {
-  SHIFT_TYPES, SCHOOL_START, SCHOOL_END, isSchoolDay, mondayOf, weekDates, shiftWeek, fmtDayLabel, pad, timeToMinutes
+  SHIFT_TYPES, SCHOOL_START, SCHOOL_END, isSchoolDay, mondayOf, weekDates, shiftWeek, fmtDayLabel, pad, timeToMinutes, halfHourOptions
 } from "./js/cafe-dates.js";
 import { toast, showOverlay, closeOverlay, esc, renderHeader } from "./js/common.js";
 import { renderChatPanel } from "./js/chat.js";
@@ -310,8 +310,12 @@ function promptExtraSlot() {
     <div class="form-row"><label>Date</label><input type="date" id="exDate"></div>
     <div class="form-row"><label>Message shown to volunteers</label><input id="exMsg" placeholder="e.g. Help with labeling new merchandise"></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-      <div class="form-row"><label>Start time</label><input id="exStart" placeholder="e.g. 9:00 AM"></div>
-      <div class="form-row"><label>End time</label><input id="exEnd" placeholder="e.g. 10:00 AM"></div>
+      <div class="form-row"><label>Start time</label>
+        <select id="exStart">${halfHourOptions().map(t => `<option value="${t}">${t}</option>`).join('')}</select>
+      </div>
+      <div class="form-row"><label>End time</label>
+        <select id="exEnd">${halfHourOptions().map((t, i) => `<option value="${t}" ${i === 2 ? 'selected' : ''}>${t}</option>`).join('')}</select>
+      </div>
     </div>
     <div class="form-row"><label>How many slots?</label><input type="number" min="1" value="1" id="exQty"></div>
     <button class="btn btn-primary" style="width:100%" id="exSave">Add slot(s)</button>

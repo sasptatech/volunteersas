@@ -60,3 +60,14 @@ export function timeToMinutes(t) {
   if (ampm === 'am' && h === 12) h = 0;
   return h * 60 + min;
 }
+// Half-hour time options from 6:00 AM to 6:00 PM, formatted consistently (e.g. "6:00 AM", "6:30 AM").
+export function halfHourOptions(startHour = 6, endHour = 18) {
+  const out = [];
+  for (let mins = startHour * 60; mins <= endHour * 60; mins += 30) {
+    let h = Math.floor(mins / 60), m = mins % 60;
+    const ampm = h < 12 ? 'AM' : 'PM';
+    let h12 = h % 12; if (h12 === 0) h12 = 12;
+    out.push(`${h12}:${pad(m)} ${ampm}`);
+  }
+  return out;
+}

@@ -15,8 +15,8 @@
 
 <script type="module">
 import { watchAuth, getProfile, ECOSYSTEMS } from "./js/auth.js";
-import { db, doc, updateDoc, storageRef, uploadBytes, getDownloadURL } from "./js/firebase-init.js";
-import { toast, renderHeader, esc, bubbleHtml } from "./js/common.js";
+import { db, doc, updateDoc, deleteDoc, collection, query, where, getDocs, storageRef, uploadBytes, getDownloadURL } from "./js/firebase-init.js";
+import { toast, showOverlay, closeOverlay, renderHeader, esc, bubbleHtml } from "./js/common.js";
 
 const root = document.getElementById('root');
 
@@ -53,6 +53,12 @@ function render(p) {
       <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;margin-bottom:16px"><input type="checkbox" id="pEmailOptOut" style="width:auto" ${p.emailOptOut ? 'checked' : ''}> Don't send me email notifications</label>
 
       <button class="btn btn-primary" style="width:100%" id="saveBtn">Save changes</button>
+    </div>
+
+    <div class="card" style="padding:20px;margin-top:16px;border-left:4px solid var(--red)">
+      <h3 style="margin-top:0;color:var(--red)">Danger zone</h3>
+      <p style="font-size:12.5px;color:var(--ink-soft)">Permanently deletes your account and profile, and removes you from any events, Cafe shifts, or sign-ups you're currently part of. This cannot be undone.</p>
+      <button class="btn btn-ghost" style="color:var(--red);border-color:var(--red)" id="deleteAccountBtn">Delete my account</button>
     </div>
   </div>`;
 
@@ -97,6 +103,36 @@ function render(p) {
       }
       toast('Profile updated.');
     } catch (e) { toast('Could not save: ' + e.message); }
+  };
+
+  document.getElementById('deleteAccountBtn').onclick = () => {
+    showOverlay(`<div class="modal" style="position:relative">
+      <button class="close-x" onclick="closeOverlay()">✕</button>
+      <h2 style="color:var(--red)">Delete your account?</h2>
+      <p style="font-size:13.5px;color:var(--ink-soft)">This permanently deletes your VolunteerSAS profile and cancels any events, Cafe shifts, or sign-ups you're currently part of. This cannot be undone.</p>
+      <div class="form-row"><label>Type DELETE to confirm</label><input id="deleteConfirmInput"></div>
+      <button class="btn btn-primary" style="width:100%;background:var(--red)" id="confirmDeleteBtn">Permanently delete my account</button>
+    </div>`);
+    document.getElementById('confirmDeleteBtn').onclick = async () => {
+      if (document.getElementById('deleteConfirmInput').value.trim() !== 'DELETE') { toast('Please type DELETE to confirm.'); return; }
+      const btn = document.getElementById('confirmDeleteBtn');
+      btn.disabled = true; btn.textContent = 'Deleting…';
+      try {
+        for (const coll of ['signups', 'cafeSignups', 'eventSlotSignups', 'eventItemSignups']) {
+          const snap = await getDocs(query(collection(db, coll), where('uid', '==', p.uid)));
+          for (const d of snap.docs) await deleteDoc(doc(db, coll, d.id));
+        }
+        await deleteDoc(doc(db, 'users', p.uid));
+        try {
+          const { auth } = await import("./js/firebase-init.js");
+          const { deleteUser } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js");
+          await deleteUser(auth.currentUser);
+        } catch (e) {
+          toast('Profile deleted. Sign-in needs a recent login to fully remove — sign out and back in, then delete again if prompted.');
+        }
+        location.href = 'index.html';
+      } catch (e) { toast('Could not delete account: ' + e.message); btn.disabled = false; btn.textContent = 'Permanently delete my account'; }
+    };
   };
 }
 </script>
