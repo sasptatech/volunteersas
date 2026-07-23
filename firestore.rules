@@ -122,6 +122,14 @@ service cloud.firestore {
       allow create: if isSignedIn();
     }
 
+    // ---- outgoing email queue (Firebase "Trigger Email" extension sends these) ----
+    // Only admins may queue mail; the extension uses the Admin SDK and bypasses
+    // these rules to actually send. No client may read/update/delete the queue,
+    // so recipient lists and message contents stay server-side.
+    match /mail/{mailId} {
+      allow create: if isAnyAdminTier();
+    }
+
     // ---- audit log (superadmin visibility only) ----
     match /auditLog/{logId} {
       allow read: if isSuperadmin();

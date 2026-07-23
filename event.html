@@ -30,6 +30,13 @@ const params = new URLSearchParams(location.search);
 const eventId = params.get('id');
 let ev = null, signups = [], slotSignups = [], itemSignups = [], usersCache = {}, editing = false;
 
+// Flip to true only once ALL of these are done: (1) Brevo account + a verified
+// sender, (2) the Firebase "Trigger Email from Firestore" extension installed and
+// pointed at Brevo with a default From address, (3) the `mail` rule published in
+// the Firestore console. Until then the "Email everyone" button explains it isn't
+// connected, so no message is ever silently dropped into an unsent queue.
+const EMAIL_ENABLED = false;
+
 if (!eventId) { root.innerHTML = `<div class="section"><p>No event specified.</p></div>`; }
 
 watchAuth((profile, needsProfile) => {
@@ -52,6 +59,32 @@ async function notifyEventAdmins(message) {
       });
     } catch (e) { /* non-fatal */ }
   }
+}
+
+// Gather email addresses for everyone registered for this event, across all
+// four sign-up types. Excludes anyone who opted out of email or has no address.
+async function collectEmailRecipients() {
+  const uids = [...new Set([
+    ...signups.map(s => s.uid),
+    ...slotSignups.map(s => s.uid),
+    ...itemSignups.map(s => s.uid),
+  ].filter(Boolean))];
+  const emails = [];
+  let optedOut = 0, noEmail = 0;
+  for (const uid of uids) {
+    let u = usersCache[uid];
+    if (!u) {
+      try {
+        const s = await getDoc(doc(db, 'users', uid));
+        if (s.exists()) { u = { uid, ...s.data() }; usersCache[uid] = u; }
+      } catch (e) { /* skip unreadable */ }
+    }
+    if (!u) { noEmail++; continue; }
+    if (u.emailOptOut) { optedOut++; continue; }
+    if (!u.email) { noEmail++; continue; }
+    emails.push(u.email);
+  }
+  return { emails: [...new Set(emails)], optedOut, noEmail };
 }
 
 function loadEvent() {
@@ -388,8 +421,89 @@ function wireHandlers(isAdminHere) {
   };
 
   const emailBtn = document.getElementById('emailAllBtn');
-  if (emailBtn) emailBtn.onclick = () => {
-    toast('Email sending isn\'t wired up yet (pending SendGrid setup) — this will queue once that\'s live.');
+  if (emailBtn) emailBtn.onclick = async () => {
+    if (!EMAIL_ENABLED) {
+      toast("Email sending isn't connected yet — the PTA is still finishing setup.");
+      return;
+    }
+    emailBtn.disabled = true;
+    const originalLabel = emailBtn.textContent;
+    emailBtn.textContent = 'Gathering recipients…';
+    let recipients;
+    try { recipients = await collectEmailRecipients(); }
+    finally { emailBtn.disabled = false; emailBtn.textContent = originalLabel; }
+    const { emails, optedOut, noEmail } = recipients;
+    if (emails.length === 0) {
+      toast((optedOut || noEmail)
+        ? 'No one to email — everyone registered has opted out or has no email.'
+        : 'No one has registered yet.');
+      return;
+    }
+    const notes = [];
+    if (optedOut) notes.push(`${optedOut} opted out`);
+    if (noEmail) notes.push(`${noEmail} without an email`);
+    showOverlay(`<div class="modal" style="position:relative">
+      <button class="close-x" onclick="closeOverlay()">✕</button>
+      <h2>Email everyone registered</h2>
+      <p style="font-size:13.5px;color:var(--ink-soft)">
+        Sending to <strong>${emails.length}</strong> ${emails.length === 1 ? 'person' : 'people'} registered for "${esc(ev.title)}".
+        ${notes.length ? `<br>(${notes.join(', ')} — not included.)` : ''}
+        <br>Recipients are BCC'd, so they can't see each other's addresses.
+      </p>
+      <div class="form-row"><label>Subject</label><input id="emSubject" value="${esc(ev.title)} — a message from the organizers"></div>
+      <div class="form-row"><label>Message</label><textarea id="emBody" rows="7" placeholder="Write your message to everyone who registered…"></textarea></div>
+      <button class="btn btn-primary" style="width:100%" id="confirmEmail">Send email</button>
+    </div>`);
+    document.getElementById('confirmEmail').onclick = async () => {
+      const subject = document.getElementById('emSubject').value.trim();
+      const body = document.getElementById('emBody').value.trim();
+      if (!subject) { toast('Please add a subject.'); return; }
+      if (!body) { toast('Please write a message.'); return; }
+      const btn = document.getElementById('confirmEmail');
+      btn.disabled = true; btn.textContent = 'Sending…';
+      const me = getProfile();
+      // Unsubscribe path: recipients turn off email in their own profile. Uses
+      // the current site origin so it stays correct if the domain later changes.
+      const prefsUrl = `${location.origin}/profile.html`;
+      const textFooter =
+        `\n\n— SAS PTA · VolunteerSAS\nYou're receiving this because you registered for a PTA event. ` +
+        `To stop receiving these emails, sign in and turn off email notifications in your profile: ${prefsUrl}`;
+      const htmlFooter =
+        `<br><br><hr style="border:none;border-top:1px solid #e5e0d8">` +
+        `<p style="font-size:12px;color:#8a857c;margin:0">— SAS PTA · VolunteerSAS<br>` +
+        `You're receiving this because you registered for a PTA event. ` +
+        `<a href="${prefsUrl}">Sign in and turn off email notifications</a> to stop receiving these.</p>`;
+      const mailDoc = {
+        bcc: emails,
+        message: {
+          subject,
+          text: body + textFooter,
+          // We deliberately DON'T set `from` — the Firebase extension's default
+          // sender is used, so swapping to the real PTA domain later is one config
+          // change with no code edit.
+          html: `<div style="font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.5;color:#1a1a1a">` +
+                `${esc(body).replace(/\n/g, '<br>')}${htmlFooter}</div>`,
+        },
+        // Metadata (ignored by the extension, kept for our own records):
+        eventId, sentByUid: me.uid, sentByName: me.displayName, createdAt: serverTimestamp(),
+      };
+      if (me.email) mailDoc.to = [me.email]; // sender gets a copy; group stays BCC
+      try {
+        await addDoc(collection(db, 'mail'), mailDoc);
+        // Accountability trail (Superadmin-visible audit log).
+        try {
+          await addDoc(collection(db, 'auditLog'), {
+            actorUid: me.uid, actorName: me.displayName, action: 'event_email_sent',
+            eventId, subject, recipientCount: emails.length, createdAt: serverTimestamp(),
+          });
+        } catch (e) { /* non-fatal */ }
+        closeOverlay();
+        toast(`Email queued to ${emails.length} ${emails.length === 1 ? 'person' : 'people'}.`);
+      } catch (e) {
+        btn.disabled = false; btn.textContent = 'Send email';
+        toast('Could not send: ' + e.message);
+      }
+    };
   };
 }
 
