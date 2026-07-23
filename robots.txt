@@ -1,0 +1,11 @@
+# VolunteerSAS — soft-launch phase.
+# Discourage all search engines from indexing the site while it's invite-only.
+# When you go to a wider public launch, revisit this: you'll likely want to
+# allow crawling of the landing page (Disallow: with specific paths, or remove
+# this block) so people can find VolunteerSAS in search.
+#
+# Note: robots.txt is advisory only. Well-behaved crawlers (Google, Bing) obey
+# it; it does NOT stop a person with the link or a malicious bot. Real bot
+# protection is reCAPTCHA v3 + Firebase App Check (Stage 2).
+User-agent: *
+Disallow: /
