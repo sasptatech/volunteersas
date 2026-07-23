@@ -35,7 +35,7 @@ let ev = null, signups = [], slotSignups = [], itemSignups = [], usersCache = {}
 // pointed at Brevo with a default From address, (3) the `mail` rule published in
 // the Firestore console. Until then the "Email everyone" button explains it isn't
 // connected, so no message is ever silently dropped into an unsent queue.
-const EMAIL_ENABLED = false;
+const EMAIL_ENABLED = true;
 
 if (!eventId) { root.innerHTML = `<div class="section"><p>No event specified.</p></div>`; }
 
