@@ -83,9 +83,10 @@ function buildItems() {
     ...myCafeSignups.map(s => {
       const st = SHIFT_TYPES.find(t => t.id === s.shift) || {};
       return {
-        type: 'cafe', date: s.date, id: s.id, time: st.label || s.shift,
-        label: `PTA Cafe — ${st.label || s.shift}`, href: 'cafe.html',
-        startTime: st.label ? st.label.split('–')[0].trim() : '9:00 AM', durationHrs: st.hrs,
+        type: 'cafe', date: s.date, id: s.id,
+        time: st.label ? `${st.label} (${st.startTime}–${st.endTime})` : (s.shift === 'extra' ? (s.message || 'Extra slot') : s.shift),
+        label: `PTA Cafe — ${st.label || s.message || 'shift'}`, href: 'cafe.html',
+        startTime: st.startTime || s.startTime || '9:00 AM', durationHrs: st.hrs,
         location: 'PTA Cafe, SAS', description: 'PTA Cafe volunteer shift.',
       };
     }),

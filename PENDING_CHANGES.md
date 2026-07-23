@@ -1,22 +1,23 @@
 # Pending Changes — batch these into GitHub together
 
-## This round: 4 fixes
+## This round: Cafe bubbles, menu link, Members tab overhaul
 
 **Changed files:**
-- admin.html — removed the seed events button entirely; Members tab now visible
-  to any Admin/Store Admin (grant/revoke/remove actions still Superadmin-only)
-- cafe.html — extra slot creation now asks "how many slots?" and creates that
-  many at once; also notifies Store Admins when a volunteer self-cancels a shift
-- event.html — self-cancel (RSVP, volunteer slot, item sign-up) now notifies
-  that event's admin(s)
-- firestore.rules — fixed the actual bug behind "add slots doesn't work": the
-  create rule required the signup's uid to match the creator's uid, which broke
-  for admin-created *unclaimed* slots (uid: null by design). Rule now allows
-  Store Admins to create unclaimed slots, and any volunteer to claim one.
-
-## IMPORTANT — re-publish Firestore rules
-The cafeSignups rule changed. Firebase console → Firestore Database → Rules →
-paste updated firestore.rules → Publish.
+- js/cafe-dates.js — shift labels renamed to "Morning shift" / "Afternoon shift";
+  added explicit startTime/endTime fields; added timeToMinutes() sort helper
+- cafe.html — extra slots now ask for start/end time and render as their own
+  bubble (same card style as the shift bubbles), grouped by batch so N slots
+  with the same message/time show as one bubble with an "X open" count. All
+  bubbles on a day (shifts + extras) are now sorted together by start time.
+  Also removed the "View this term's menu" link banner.
+- schedule.html — updated to use the new explicit start/end time fields
+  (previously parsed them out of the old label text)
+- admin.html — Members tab:
+  - Sortable "Name" and "Roles" column headers (click to sort/reverse)
+  - Make Admin/Make Store Admin buttons hidden for members who are already
+    Superadmin (they don't need them)
+  - "Remove Admin"/"Remove Store Admin" renamed to "Revoke Admin"/"Revoke Store Admin"
+  - Directory removal renamed to "Delete from directory", moved to its own column
 
 ## Still outstanding (tracked, not urgent)
 - reCAPTCHA v3 site key still a placeholder (agreed: later — email/captcha next session)
@@ -38,3 +39,13 @@ paste updated firestore.rules → Publish.
 - ~~Cafe extra slots quantity + permission fix~~ ✅ done
 - ~~Self-cancel notifies admins~~ ✅ done
 - ~~Members tab open to any Admin/Store Admin~~ ✅ done
+- ~~Cafe bubbles: timing, grouping, sort by start time~~ ✅ done
+- ~~Members tab: sort, rename buttons, new column~~ ✅ done
+
+## Additional fix in this same batch
+- Superadmins are now correctly treated as implicit Admin + Store Admin
+  everywhere (this was already true for permissions via isAdmin()/isStoreAdmin()
+  helpers, but two spots checked the raw flags directly and missed it):
+  - event.html: Superadmins now show up as eligible co-admins for events
+  - admin.html: Members table now displays a Superadmin's badges as
+    "⭐ Superadmin 🛡️ Admin ☕ Store Admin" instead of just the star

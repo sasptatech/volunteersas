@@ -397,7 +397,7 @@ async function loadCoAdminPicker() {
   const { getDocs, collection: col } = await import("./js/firebase-init.js");
   const snap = await getDocs(col(db, 'users'));
   const eligible = snap.docs.map(d => ({ uid: d.id, ...d.data() }))
-    .filter(u => (u.isAdmin || u.isStoreAdmin) && !(ev.adminUids || []).includes(u.uid));
+    .filter(u => (u.isAdmin || u.isStoreAdmin || u.isSuperadmin) && !(ev.adminUids || []).includes(u.uid));
   const wrap = document.getElementById('addCoAdminWrap');
   if (!wrap) return;
   wrap.innerHTML = eligible.length

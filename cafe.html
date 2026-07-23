@@ -20,7 +20,7 @@ import {
   serverTimestamp
 } from "./js/firebase-init.js";
 import {
-  SHIFT_TYPES, SCHOOL_START, SCHOOL_END, isSchoolDay, mondayOf, weekDates, shiftWeek, fmtDayLabel, pad
+  SHIFT_TYPES, SCHOOL_START, SCHOOL_END, isSchoolDay, mondayOf, weekDates, shiftWeek, fmtDayLabel, pad, timeToMinutes
 } from "./js/cafe-dates.js";
 import { toast, showOverlay, closeOverlay, esc, renderHeader } from "./js/common.js";
 import { renderChatPanel } from "./js/chat.js";
@@ -54,14 +54,27 @@ function watchData() {
 }
 
 function signupsFor(date, shift) { return cafeSignups.filter(s => s.date === date && s.shift === shift); }
-function extraSlotsFor(date) { return cafeSignups.filter(s => s.date === date && s.overflow); }
 function mySignup(date, shift) { return cafeSignups.find(s => s.date === date && s.shift === shift && s.uid === getProfile().uid); }
+
+function dayBubbles(date) {
+  const shiftBubbles = SHIFT_TYPES.map(st => ({
+    kind: 'shift', shiftId: st.id, label: st.label, startTime: st.startTime, endTime: st.endTime,
+    capacity: 2, entries: signupsFor(date, st.id),
+  }));
+  const groups = {};
+  cafeSignups.filter(s => s.date === date && s.overflow).forEach(s => {
+    const key = s.groupId || s.id;
+    if (!groups[key]) groups[key] = { kind: 'extra', groupId: key, label: s.message, startTime: s.startTime, endTime: s.endTime, entries: [] };
+    groups[key].entries.push(s);
+  });
+  const extraBubbles = Object.values(groups).map(g => ({ ...g, capacity: g.entries.length }));
+  return [...shiftBubbles, ...extraBubbles].sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
+}
 
 function render() {
   const storeAdmin = isStoreAdmin();
   root.innerHTML = `<div class="section">
     <h1 class="serif" style="font-size:22px">☕ Cafe Volunteer</h1>
-    <div class="card" style="padding:14px;margin-bottom:16px"><a href="menu.html" class="small-link">🍽️ View this term's PTA Cafe menu →</a></div>
 
     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap">
       <div style="display:flex;gap:6px">
@@ -127,39 +140,32 @@ function renderWeek() {
     }
     out += `<div class="card" style="padding:14px">
       <div style="font-weight:700;margin-bottom:10px">☕ ${dayLabel}</div>
-      ${SHIFT_TYPES.map(st => shiftBlock(date, st)).join('<div style="height:10px"></div>')}
-      ${extraSlotsBlock(date)}
+      ${dayBubbles(date).map(b => renderBubbleCard(date, b)).join('<div style="height:10px"></div>')}
     </div>`;
   });
   out += `</div>`;
   return out;
 }
 
-function shiftBlock(date, st) {
-  const signups = signupsFor(date, st.id);
-  const spotsLeft = 2 - signups.length;
-  const mine = mySignup(date, st.id);
-  let rows = signups.map(s => `<div style="font-size:12.5px;padding:4px 0;display:flex;justify-content:space-between">
+function renderBubbleCard(date, b) {
+  const filled = b.kind === 'shift' ? b.entries : b.entries.filter(s => s.uid);
+  const unclaimed = b.kind === 'extra' ? b.entries.filter(s => !s.uid) : [];
+  const spotsLeft = b.capacity - filled.length;
+  let rows = filled.map(s => `<div style="font-size:12.5px;padding:4px 0;display:flex;justify-content:space-between">
       <span><strong>${esc(s.name)}</strong>${s.comment ? ` — <span style="color:var(--ink-soft)">${esc(s.comment)}</span>` : ''}</span>
       ${s.uid === getProfile().uid ? `<button class="small-link" style="color:var(--red)" onclick="window.__removeCafe('${s.id}')">Remove</button>` : ''}
     </div>`).join('');
-  for (let i = 0; i < spotsLeft; i++) rows += `<div style="font-size:12.5px;padding:4px 0;color:var(--ink-soft)">Open slot — <button class="small-link" onclick="window.__openCafeSignup('${date}','${st.id}',false)">Sign up</button></div>`;
-  return `<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px">
+  if (b.kind === 'shift') {
+    for (let i = 0; i < spotsLeft; i++) rows += `<div style="font-size:12.5px;padding:4px 0;color:var(--ink-soft)">Open slot — <button class="small-link" onclick="window.__openCafeSignup('${date}','${b.shiftId}',false)">Sign up</button></div>`;
+  } else {
+    unclaimed.forEach(s => { rows += `<div style="font-size:12.5px;padding:4px 0;color:var(--ink-soft)">Open slot — <button class="small-link" onclick="window.__signupExtra('${s.id}')">Sign up</button></div>`; });
+  }
+  return `<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px${b.kind === 'extra' ? ';border-left:3px solid var(--gold)' : ''}">
     <div style="display:flex;justify-content:space-between;align-items:center">
-      <span style="font-weight:600;font-size:13.5px">${st.label}</span>
+      <span style="font-weight:600;font-size:13.5px">${b.kind === 'extra' ? '➕ ' : ''}${esc(b.label || (b.kind === 'extra' ? 'Extra help needed' : ''))} <span style="color:var(--ink-soft);font-weight:400">(${esc(b.startTime || '')}–${esc(b.endTime || '')})</span></span>
       <span class="chip" style="background:${spotsLeft <= 0 ? '#E3F3EC' : '#FDF1D8'};color:${spotsLeft <= 0 ? '#0E8A6D' : '#96721E'}">${spotsLeft <= 0 ? 'Full' : spotsLeft + ' open'}</span>
     </div>
     <div style="margin-top:6px">${rows}</div>
-  </div>`;
-}
-
-function extraSlotsBlock(date) {
-  const extras = extraSlotsFor(date);
-  if (!extras.length) return '';
-  return `<div style="margin-top:10px;border-top:1px dashed var(--line);padding-top:8px">
-    ${extras.map(s => `<div style="font-size:12.5px;padding:4px 0;color:var(--gold)">
-      ➕ ${esc(s.message || 'Extra help needed')} — ${s.uid ? `<strong>${esc(s.name)}</strong>` : `<button class="small-link" onclick="window.__signupExtra('${s.id}')">Sign up</button>`}
-    </div>`).join('')}
   </div>`;
 }
 
@@ -303,17 +309,24 @@ function promptExtraSlot() {
     <h2>Add extra slot(s)</h2>
     <div class="form-row"><label>Date</label><input type="date" id="exDate"></div>
     <div class="form-row"><label>Message shown to volunteers</label><input id="exMsg" placeholder="e.g. Help with labeling new merchandise"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="form-row"><label>Start time</label><input id="exStart" placeholder="e.g. 9:00 AM"></div>
+      <div class="form-row"><label>End time</label><input id="exEnd" placeholder="e.g. 10:00 AM"></div>
+    </div>
     <div class="form-row"><label>How many slots?</label><input type="number" min="1" value="1" id="exQty"></div>
     <button class="btn btn-primary" style="width:100%" id="exSave">Add slot(s)</button>
   </div>`);
   document.getElementById('exSave').onclick = async () => {
     const date = document.getElementById('exDate').value;
     const message = document.getElementById('exMsg').value.trim();
+    const startTime = document.getElementById('exStart').value.trim();
+    const endTime = document.getElementById('exEnd').value.trim();
     const qty = Math.max(1, parseInt(document.getElementById('exQty').value, 10) || 1);
-    if (!date || !message) { toast('Please fill in both fields.'); return; }
+    if (!date || !message || !startTime || !endTime) { toast('Please fill in all fields.'); return; }
+    const groupId = 'extra_' + Date.now();
     try {
       for (let i = 0; i < qty; i++) {
-        await addDoc(collection(db, 'cafeSignups'), { date, shift: 'extra', overflow: true, message, uid: null, name: null, createdAt: serverTimestamp() });
+        await addDoc(collection(db, 'cafeSignups'), { date, shift: 'extra', overflow: true, groupId, message, startTime, endTime, uid: null, name: null, createdAt: serverTimestamp() });
       }
       closeOverlay(); toast(`${qty} extra slot${qty > 1 ? 's' : ''} added.`);
     } catch (e) { toast('Could not add: ' + e.message); }

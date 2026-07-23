@@ -15,8 +15,8 @@ export const HOLIDAY_RANGES = [
   ["2027-05-20", "2027-05-20"],
 ];
 export const SHIFT_TYPES = [
-  { id: "am", label: "8:30am – 12:00pm", hrs: 3.5 },
-  { id: "pm", label: "12:00pm – 4:00pm", hrs: 4 },
+  { id: "am", label: "Morning shift", startTime: "8:30 AM", endTime: "12:00 PM", hrs: 3.5 },
+  { id: "pm", label: "Afternoon shift", startTime: "12:00 PM", endTime: "4:00 PM", hrs: 4 },
 ];
 
 export function pad(n) { return n < 10 ? "0" + n : "" + n; }
@@ -48,4 +48,15 @@ export function shiftWeek(mondayStr, dir) {
 }
 export function fmtDayLabel(dateStr) {
   return new Date(dateStr + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+}
+export function timeToMinutes(t) {
+  if (!t) return 0;
+  const m = t.trim().match(/(\d{1,2}):(\d{2})\s*(am|pm)?/i);
+  if (!m) return 0;
+  let h = parseInt(m[1], 10);
+  const min = parseInt(m[2], 10);
+  const ampm = m[3] ? m[3].toLowerCase() : null;
+  if (ampm === 'pm' && h < 12) h += 12;
+  if (ampm === 'am' && h === 12) h = 0;
+  return h * 60 + min;
 }

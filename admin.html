@@ -25,6 +25,8 @@ import { MAPPEDIN_LOCATIONS, findMappedinLocation } from "./js/mappedin-location
 
 const root = document.getElementById('root');
 let tab = 'events';
+let memberSortField = 'name';
+let memberSortDir = 'asc';
 let events = [], users = {}, hours = [], auditLog = [];
 
 watchAuth((profile, needsProfile) => {
@@ -95,21 +97,44 @@ function renderHoursTab() {
   </div>`;
 }
 
+function roleRank(u) {
+  if (u.isSuperadmin) return 3;
+  if (u.isAdmin) return 2;
+  if (u.isStoreAdmin) return 1;
+  return 0;
+}
+function sortArrow(field) { return memberSortField === field ? (memberSortDir === 'asc' ? ' ▲' : ' ▼') : ''; }
+
 function renderMembersTab() {
-  const all = Object.values(users).sort((a, b) => (a.displayName || '').localeCompare(b.displayName || ''));
   const iAmSuperadmin = isSuperadmin();
+  let all = Object.values(users);
+  all.sort((a, b) => {
+    const cmp = memberSortField === 'name'
+      ? (a.displayName || '').localeCompare(b.displayName || '')
+      : roleRank(a) - roleRank(b);
+    return memberSortDir === 'asc' ? cmp : -cmp;
+  });
   return `<div class="card" style="padding:6px 16px;overflow-x:auto">
-    <table class="datatable"><thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Roles</th>${iAmSuperadmin ? '<th></th>' : ''}</tr></thead>
+    <table class="datatable"><thead><tr>
+      <th><button class="small-link" onclick="window.__sortMembers('name')">Name${sortArrow('name')}</button></th>
+      <th>Email</th><th>Phone</th>
+      <th><button class="small-link" onclick="window.__sortMembers('role')">Roles${sortArrow('role')}</button></th>
+      ${iAmSuperadmin ? '<th>Admin actions</th><th>Directory</th>' : ''}
+    </tr></thead>
     <tbody>${all.map(u => `<tr>
         <td>${esc(u.anonymous ? 'Anonymous' : u.displayName)}</td><td>${esc(u.email)}</td><td>${esc(u.phone || '')}</td>
-        <td>${u.isSuperadmin ? '⭐ Superadmin ' : ''}${u.isAdmin ? '🛡️ Admin ' : ''}${u.isStoreAdmin ? '☕ Store Admin' : ''}</td>
-        ${iAmSuperadmin ? `<td style="white-space:nowrap">
-          ${u.uid !== getProfile().uid ? `
-            <button class="small-link" onclick="window.__toggleFlag('${u.uid}','isAdmin',${!u.isAdmin})">${u.isAdmin ? 'Remove Admin' : 'Make Admin'}</button>
-            <button class="small-link" onclick="window.__toggleFlag('${u.uid}','isStoreAdmin',${!u.isStoreAdmin})">${u.isStoreAdmin ? 'Remove Store Admin' : 'Make Store Admin'}</button>
-            <button class="small-link" style="color:var(--red)" onclick="window.__removeMember('${u.uid}')">Remove</button>
-          ` : '<span style="font-size:11.5px;color:var(--ink-soft)">You</span>'}
-        </td>` : ''}</tr>`).join('') || `<tr><td colspan="${iAmSuperadmin ? 5 : 4}">No members yet.</td></tr>`}</tbody></table>
+        <td>${u.isSuperadmin ? '⭐ Superadmin 🛡️ Admin ☕ Store Admin' : `${u.isAdmin ? '🛡️ Admin ' : ''}${u.isStoreAdmin ? '☕ Store Admin' : ''}`}</td>
+        ${iAmSuperadmin ? `
+        <td style="white-space:nowrap">
+          ${u.uid !== getProfile().uid && !u.isSuperadmin ? `
+            <button class="small-link" onclick="window.__toggleFlag('${u.uid}','isAdmin',${!u.isAdmin})">${u.isAdmin ? 'Revoke Admin' : 'Make Admin'}</button>
+            <button class="small-link" onclick="window.__toggleFlag('${u.uid}','isStoreAdmin',${!u.isStoreAdmin})">${u.isStoreAdmin ? 'Revoke Store Admin' : 'Make Store Admin'}</button>
+          ` : '<span style="font-size:11.5px;color:var(--ink-soft)">—</span>'}
+        </td>
+        <td>
+          ${u.uid !== getProfile().uid ? `<button class="small-link" style="color:var(--red)" onclick="window.__removeMember('${u.uid}')">Delete from directory</button>` : '<span style="font-size:11.5px;color:var(--ink-soft)">You</span>'}
+        </td>` : ''}
+      </tr>`).join('') || `<tr><td colspan="${iAmSuperadmin ? 6 : 4}">No members yet.</td></tr>`}</tbody></table>
   </div>`;
 }
 
@@ -274,6 +299,12 @@ function wireTabHandlers() {
     if (!confirm('Remove this hours entry? Use this if the volunteer didn\'t actually show up.')) return;
     try { await deleteDoc(doc(db, 'hours', id)); await logAudit('Removed hours entry (no-show)', id); toast('Removed.'); }
     catch (e) { toast('Could not remove: ' + e.message); }
+  };
+
+  window.__sortMembers = (field) => {
+    if (memberSortField === field) memberSortDir = memberSortDir === 'asc' ? 'desc' : 'asc';
+    else { memberSortField = field; memberSortDir = 'asc'; }
+    render();
   };
 
   window.__toggleFlag = async (uid, field, value) => {
