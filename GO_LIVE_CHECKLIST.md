@@ -89,6 +89,24 @@ findable. Revisit before announcing.
 Once Firebase Hosting is proven, shut the Netlify deploy down — and remove its domain
 from the reCAPTCHA list at the same time.
 
+### 8. Stand up a separate staging Firebase project — DECIDED, do at launch time
+**Decision (2026-07-24):** at launch, split into two Firebase projects — a `staging`
+one and the existing `sasptavolunteer` as production — for true isolation (separate
+Firestore/Auth/Storage). Deliberately NOT done during soft-launch dev; build it when
+we're ready to launch.
+**What it involves:** a second Firebase project; duplicate the Firestore + Storage
+rules, App Check/reCAPTCHA keys (staging needs its own domains), and the Trigger
+Email extension (or leave staging without email); a way to point `firebase-init.js`
+at the right project per environment (awkward with no build step — likely a small
+config swap or a second hosting target). Non-trivial; plan a dedicated session.
+**Interim (now):** single project. Turn on Firebase Hosting **preview channels** for
+low-risk UI previews before they hit the live URL.
+
+### 9. Custom domain — leaning yes, pending team's name choice
+**Decision (2026-07-24):** team is discussing a PTA-owned domain; user considers it
+worth it. Does double duty (website URL + fixes email deliverability — see item 3).
+Non-disruptive to add later; `.web.app` keeps working alongside it.
+
 ---
 
 ## 🟡 Nice to have (not launch blockers)
