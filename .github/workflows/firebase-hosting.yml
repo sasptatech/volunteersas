@@ -1,0 +1,29 @@
+# Auto-deploy to Firebase Hosting on every push to main.
+# Mirrors what Netlify does today, so pushing stays the only step needed.
+#
+# Requires a repository secret named FIREBASE_SERVICE_ACCOUNT containing the
+# full JSON key from:
+#   Firebase console -> Project settings -> Service accounts -> Generate new private key
+name: Deploy to Firebase Hosting
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      # No build step — this is a static, no-bundler site, so the repo is
+      # deployed as-is (minus whatever firebase.json's "ignore" excludes).
+      - name: Deploy to Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          channelId: live
+          projectId: sasptavolunteer
