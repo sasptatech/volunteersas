@@ -21,6 +21,17 @@ export const SHIFT_TYPES = [
   { id: "pm", label: "Afternoon shift", startTime: "12:00 PM", endTime: "4:00 PM", hrs: 4 },
 ];
 
+// How many volunteers a regular AM/PM shift seats by default. Store Admins can
+// override this per day/shift (0 = shift closed) via cafeDayOverrides/{date}.caps.
+export const DEFAULT_SHIFT_CAPACITY = 2;
+export const MAX_SHIFT_CAPACITY = 6;
+
+// dayCaps: map of dateStr -> { am, pm } from cafeDayOverrides docs' `caps` field.
+export function shiftCapacity(dayCaps, dateStr, shiftId) {
+  const c = dayCaps && dayCaps[dateStr] && dayCaps[dateStr][shiftId];
+  return (typeof c === "number") ? c : DEFAULT_SHIFT_CAPACITY;
+}
+
 export function pad(n) { return n < 10 ? "0" + n : "" + n; }
 export function dstr(d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
 export function isHoliday(dateStr) { return HOLIDAY_RANGES.some(([s, e]) => dateStr >= s && dateStr <= e); }

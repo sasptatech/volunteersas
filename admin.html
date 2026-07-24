@@ -23,7 +23,7 @@ import { toast, showOverlay, closeOverlay, esc, renderHeader } from "./js/common
 import { rteHtml, rteValue } from "./js/rte.js";
 import { MAPPEDIN_LOCATIONS, findMappedinLocation } from "./js/mappedin-locations.js";
 import {
-  SHIFT_TYPES, isSchoolDay, mondayOf, weekDates, dstr, fmtDayLabel, timeToMinutes
+  SHIFT_TYPES, isSchoolDay, mondayOf, weekDates, dstr, fmtDayLabel, timeToMinutes, shiftCapacity
 } from "./js/cafe-dates.js";
 import { queueEmails } from "./js/email.js";
 
@@ -34,9 +34,7 @@ let memberSortDir = 'asc';
 let events = [], users = {}, hours = [], auditLog = [], sentMail = [];
 
 // ---- Cafe volunteers tab state ----
-// Regular AM/PM shifts seat two volunteers each (mirrors cafe.html).
-const CAFE_SHIFT_CAPACITY = 2;
-let cafeSignups = [], cafeOverrides = {};
+let cafeSignups = [], cafeOverrides = {}, cafeDayCaps = {};
 let cafeRange = 'week';                 // 'day' | 'week' | 'month'
 let cafeAnchor = dstr(new Date());      // any date inside the shown range
 let cafeSortField = 'date';             // 'date' | 'name' | 'empty'
@@ -70,7 +68,9 @@ function watchData() {
   if (isStoreAdmin()) {
     onSnapshot(collection(db, 'cafeSignups'), snap => { cafeSignups = snap.docs.map(d => ({ id: d.id, ...d.data() })); render(); });
     onSnapshot(collection(db, 'cafeDayOverrides'), snap => {
-      cafeOverrides = {}; snap.docs.forEach(d => { cafeOverrides[d.id] = d.data().status; }); render();
+      cafeOverrides = {}; cafeDayCaps = {};
+      snap.docs.forEach(d => { const data = d.data(); cafeOverrides[d.id] = data.status; if (data.caps) cafeDayCaps[d.id] = data.caps; });
+      render();
     });
     onSnapshot(doc(db, 'settings', 'cafeMenu'), snap => {
       cafeMenu = snap.exists() ? { items: snap.data().items || [] } : { items: [] };
@@ -178,8 +178,11 @@ function cafeSeatRows() {
       const taken = cafeSignups.filter(s => s.date === date && s.shift === st.id && !s.overflow);
       const time = `${st.startTime}–${st.endTime}`;
       const mins = timeToMinutes(st.startTime);
+      const cap = shiftCapacity(cafeDayCaps, date, st.id);
       taken.forEach(s => rows.push(cafeSeatRow(date, st.label, time, mins, s)));
-      for (let i = taken.length; i < CAFE_SHIFT_CAPACITY; i++) rows.push(cafeSeatRow(date, st.label, time, mins, null));
+      // Only show empty seats up to the (possibly reduced) capacity; a closed
+      // shift (cap 0) contributes no empty rows.
+      for (let i = taken.length; i < cap; i++) rows.push(cafeSeatRow(date, st.label, time, mins, null));
     });
     // Each extra-slot doc is its own seat; uid stays null until someone claims it.
     cafeSignups.filter(s => s.date === date && s.overflow).forEach(s => {
@@ -681,6 +684,7 @@ function wireTabHandlers() {
       </p>
       <div class="form-row"><label>Subject</label><input id="cmSubject" value="PTA Cafe — a message for volunteers"></div>
       <div class="form-row"><label>Replies go to</label><input id="cmReplyTo" value="${esc((getProfile() || {}).email || '')}" placeholder="you@example.com"></div>
+      ${(getProfile() || {}).email ? `<label style="display:flex;gap:8px;align-items:center;font-size:13px;margin-bottom:12px"><input type="checkbox" id="cmCopyMe" style="width:auto"> Send me a copy too</label>` : ''}
       <div class="form-row"><label>Message</label><textarea id="cmBody" rows="7" placeholder="Write your message…"></textarea></div>
       <button class="btn btn-primary" style="width:100%" id="cmSend">Send email</button>
     </div>`);
@@ -692,15 +696,20 @@ function wireTabHandlers() {
       const btn = document.getElementById('cmSend');
       btn.disabled = true; btn.textContent = 'Sending…';
       const replyTo = document.getElementById('cmReplyTo').value.trim();
+      const me = getProfile();
+      const copyMeEl = document.getElementById('cmCopyMe');
+      // Add myself only if not already selected, so I never get two copies.
+      const recipients = (copyMeEl && copyMeEl.checked && me.email && !emails.includes(me.email))
+        ? [...emails, me.email] : emails;
       try {
         await queueEmails({
-          recipients: emails, subject, body, replyTo,
+          recipients, subject, body, replyTo,
           reason: "You're receiving this because you signed up for a PTA Cafe shift.",
           scope: 'cafe',
         });
-        await logAudit('Emailed Cafe volunteers', `${emails.length} recipients — ${subject}`);
+        await logAudit('Emailed Cafe volunteers', `${recipients.length} recipients — ${subject}`);
         closeOverlay();
-        toast(`Email queued to ${emails.length} ${emails.length === 1 ? 'volunteer' : 'volunteers'}.`);
+        toast(`Email queued to ${recipients.length} ${recipients.length === 1 ? 'volunteer' : 'volunteers'}.`);
       } catch (e) {
         btn.disabled = false; btn.textContent = 'Send email';
         toast('Could not send: ' + e.message);

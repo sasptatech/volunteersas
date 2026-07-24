@@ -20,14 +20,15 @@ import {
   serverTimestamp
 } from "./js/firebase-init.js";
 import {
-  SHIFT_TYPES, SCHOOL_START, SCHOOL_END, isSchoolDay, mondayOf, weekDates, shiftWeek, fmtDayLabel, pad, timeToMinutes, halfHourOptions
+  SHIFT_TYPES, SCHOOL_START, SCHOOL_END, isSchoolDay, mondayOf, weekDates, shiftWeek, fmtDayLabel, pad, timeToMinutes, halfHourOptions,
+  DEFAULT_SHIFT_CAPACITY, MAX_SHIFT_CAPACITY, shiftCapacity
 } from "./js/cafe-dates.js";
 import { toast, showOverlay, closeOverlay, esc, renderHeader } from "./js/common.js";
 import { renderChatPanel } from "./js/chat.js";
 import { renderAddToCalendar } from "./js/calendar.js";
 
 const root = document.getElementById('root');
-let cafeSignups = [], dayOverrides = {};
+let cafeSignups = [], dayOverrides = {}, dayCaps = {};
 let view = 'week';
 let weekStart = mondayOf(SCHOOL_START);
 let month = SCHOOL_START.slice(0, 7);
@@ -48,7 +49,8 @@ watchAuth((profile, needsProfile) => {
 function watchData() {
   onSnapshot(collection(db, 'cafeSignups'), snap => { cafeSignups = snap.docs.map(d => ({ id: d.id, ...d.data() })); render(); });
   onSnapshot(collection(db, 'cafeDayOverrides'), snap => {
-    dayOverrides = {}; snap.docs.forEach(d => { dayOverrides[d.id] = d.data().status; });
+    dayOverrides = {}; dayCaps = {};
+    snap.docs.forEach(d => { const data = d.data(); dayOverrides[d.id] = data.status; if (data.caps) dayCaps[d.id] = data.caps; });
     render();
   });
 }
@@ -59,7 +61,7 @@ function mySignup(date, shift) { return cafeSignups.find(s => s.date === date &&
 function dayBubbles(date) {
   const shiftBubbles = SHIFT_TYPES.map(st => ({
     kind: 'shift', shiftId: st.id, label: st.label, startTime: st.startTime, endTime: st.endTime,
-    capacity: 2, entries: signupsFor(date, st.id),
+    capacity: shiftCapacity(dayCaps, date, st.id), entries: signupsFor(date, st.id),
   }));
   const groups = {};
   cafeSignups.filter(s => s.date === date && s.overflow).forEach(s => {
@@ -154,24 +156,54 @@ function renderWeek() {
 }
 
 function renderBubbleCard(date, b) {
+  const admin = isStoreAdmin();
+  const myUid = getProfile().uid;
   const filled = b.kind === 'shift' ? b.entries : b.entries.filter(s => s.uid);
   const unclaimed = b.kind === 'extra' ? b.entries.filter(s => !s.uid) : [];
   const spotsLeft = b.capacity - filled.length;
-  let rows = filled.map(s => `<div style="font-size:12.5px;padding:4px 0;display:flex;justify-content:space-between">
+  const closed = b.kind === 'shift' && b.capacity === 0;
+
+  let rows = filled.map(s => `<div style="font-size:12.5px;padding:4px 0;display:flex;justify-content:space-between;gap:8px">
       <span><strong>${esc(s.name)}</strong>${s.comment ? ` — <span style="color:var(--ink-soft)">${esc(s.comment)}</span>` : ''}</span>
-      ${s.uid === getProfile().uid ? `<button class="small-link" style="color:var(--red)" onclick="window.__removeCafe('${s.id}')">Remove</button>` : ''}
+      ${(s.uid === myUid || admin) ? `<button class="small-link" style="color:var(--red)" onclick="window.__removeCafe('${s.id}')">Remove</button>` : ''}
     </div>`).join('');
   if (b.kind === 'shift') {
-    for (let i = 0; i < spotsLeft; i++) rows += `<div style="font-size:12.5px;padding:4px 0;color:var(--ink-soft)">Open slot — <button class="small-link" onclick="window.__openCafeSignup('${date}','${b.shiftId}',false)">Sign up</button></div>`;
+    for (let i = 0; i < spotsLeft; i++) rows += `<div style="font-size:12.5px;padding:4px 0;display:flex;justify-content:space-between;gap:8px;color:var(--ink-soft)">
+      <span>Open slot — <button class="small-link" onclick="window.__openCafeSignup('${date}','${b.shiftId}',false)">Sign up</button></span>
+      ${admin ? `<button class="small-link" onclick="window.__cafeSetCap('${date}','${b.shiftId}',${b.capacity - 1})">Remove slot</button>` : ''}
+    </div>`;
   } else {
-    unclaimed.forEach(s => { rows += `<div style="font-size:12.5px;padding:4px 0;color:var(--ink-soft)">Open slot — <button class="small-link" onclick="window.__signupExtra('${s.id}')">Sign up</button></div>`; });
+    unclaimed.forEach(s => { rows += `<div style="font-size:12.5px;padding:4px 0;display:flex;justify-content:space-between;gap:8px;color:var(--ink-soft)">
+      <span>Open slot — <button class="small-link" onclick="window.__signupExtra('${s.id}')">Sign up</button></span>
+      ${admin ? `<button class="small-link" style="color:var(--red)" onclick="window.__cafeRemoveExtra('${s.id}')">Remove slot</button>` : ''}
+    </div>`; });
   }
-  return `<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px${b.kind === 'extra' ? ';border-left:3px solid var(--gold)' : ''}">
-    <div style="display:flex;justify-content:space-between;align-items:center">
+
+  const chip = closed
+    ? `<span class="chip" style="background:#EEE;color:var(--ink-soft)">Closed</span>`
+    : `<span class="chip" style="background:${spotsLeft <= 0 ? '#E3F3EC' : '#FDF1D8'};color:${spotsLeft <= 0 ? '#0E8A6D' : '#96721E'}">${spotsLeft <= 0 ? 'Full' : spotsLeft + ' open'}</span>`;
+
+  // Store Admin capacity controls for regular shifts: −/+ adjust seats, or close/reopen.
+  let adminBar = '';
+  if (admin && b.kind === 'shift') {
+    const canReduce = b.capacity > filled.length; // never strand a signed-up volunteer
+    adminBar = `<div style="display:flex;gap:8px;align-items:center;margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);font-size:12px">
+      <span style="color:var(--ink-soft)">Slots: <strong>${b.capacity}</strong></span>
+      <button class="small-link" ${canReduce ? '' : 'style="opacity:.4;pointer-events:none"'} onclick="window.__cafeSetCap('${date}','${b.shiftId}',${b.capacity - 1})">−</button>
+      <button class="small-link" ${b.capacity >= MAX_SHIFT_CAPACITY ? 'style="opacity:.4;pointer-events:none"' : ''} onclick="window.__cafeSetCap('${date}','${b.shiftId}',${b.capacity + 1})">+</button>
+      ${closed
+        ? `<button class="small-link" onclick="window.__cafeSetCap('${date}','${b.shiftId}',${DEFAULT_SHIFT_CAPACITY})">Reopen shift</button>`
+        : (filled.length === 0 ? `<button class="small-link" style="color:var(--red)" onclick="window.__cafeSetCap('${date}','${b.shiftId}',0)">Close shift</button>` : '')}
+    </div>`;
+  }
+
+  return `<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px${b.kind === 'extra' ? ';border-left:3px solid var(--gold)' : ''}${closed ? ';opacity:.75' : ''}">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
       <span style="font-weight:600;font-size:13.5px">${b.kind === 'extra' ? '➕ ' : ''}${esc(b.label || (b.kind === 'extra' ? 'Extra help needed' : ''))} <span style="color:var(--ink-soft);font-weight:400">(${esc(b.startTime || '')}–${esc(b.endTime || '')})</span></span>
-      <span class="chip" style="background:${spotsLeft <= 0 ? '#E3F3EC' : '#FDF1D8'};color:${spotsLeft <= 0 ? '#0E8A6D' : '#96721E'}">${spotsLeft <= 0 ? 'Full' : spotsLeft + ' open'}</span>
+      ${chip}
     </div>
     <div style="margin-top:6px">${rows}</div>
+    ${adminBar}
   </div>`;
 }
 
@@ -228,6 +260,34 @@ function wireBodyHandlers(storeAdmin) {
       await setDoc(doc(db, 'cafeDayOverrides', date), { status });
       toast(`Store ${status === 'open' ? 'opened' : 'closed'} for ${fmtDayLabel(date)}.`);
     } catch (e) { toast('Could not update: ' + e.message); }
+  };
+
+  // Set a regular shift's seat count for one day. 0 = closed. Never below the
+  // number already signed up (remove a volunteer first to go lower).
+  window.__cafeSetCap = async (date, shiftId, newCap) => {
+    if (!isStoreAdmin()) return;
+    newCap = Math.max(0, Math.min(MAX_SHIFT_CAPACITY, newCap));
+    const filled = signupsFor(date, shiftId).length;
+    if (newCap < filled) {
+      toast(`${filled} already signed up — remove a volunteer first to go below ${filled}.`);
+      return;
+    }
+    try {
+      const { setDoc } = await import("./js/firebase-init.js");
+      await setDoc(doc(db, 'cafeDayOverrides', date), { caps: { [shiftId]: newCap } }, { merge: true });
+      toast(newCap === 0 ? 'Shift closed.' : `Set to ${newCap} slot${newCap === 1 ? '' : 's'}.`);
+    } catch (e) { toast('Could not update: ' + e.message); }
+  };
+
+  // Remove a single unclaimed extra slot (decreasing how many are offered).
+  window.__cafeRemoveExtra = async (id) => {
+    if (!isStoreAdmin()) return;
+    const s = cafeSignups.find(x => x.id === id);
+    if (s && s.uid) { toast('That slot is taken — remove the volunteer first.'); return; }
+    try {
+      await deleteDoc(doc(db, 'cafeSignups', id));
+      toast('Open slot removed.');
+    } catch (e) { toast('Could not remove: ' + e.message); }
   };
 
   window.__cafeAddShifts = (date) => {

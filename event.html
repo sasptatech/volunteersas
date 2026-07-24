@@ -453,6 +453,7 @@ function wireHandlers(isAdminHere) {
       </p>
       <div class="form-row"><label>Subject</label><input id="emSubject" value="${esc(ev.title)} — a message from the organizers"></div>
       <div class="form-row"><label>Replies go to</label><input id="emReplyTo" value="${esc((getProfile() || {}).email || '')}" placeholder="you@example.com"></div>
+      ${(getProfile() || {}).email ? `<label style="display:flex;gap:8px;align-items:center;font-size:13px;margin-bottom:12px"><input type="checkbox" id="emCopyMe" style="width:auto"> Send me a copy too</label>` : ''}
       <div class="form-row"><label>Message</label><textarea id="emBody" rows="7" placeholder="Write your message to everyone who registered…"></textarea></div>
       <button class="btn btn-primary" style="width:100%" id="confirmEmail">Send email</button>
     </div>`);
@@ -465,9 +466,13 @@ function wireHandlers(isAdminHere) {
       btn.disabled = true; btn.textContent = 'Sending…';
       const me = getProfile();
       const replyTo = document.getElementById('emReplyTo').value.trim();
+      const copyMeEl = document.getElementById('emCopyMe');
+      // Add myself only if not already a recipient, so I never get two copies.
+      const recipients = (copyMeEl && copyMeEl.checked && me.email && !emails.includes(me.email))
+        ? [...emails, me.email] : emails;
       try {
         await queueEmails({
-          recipients: emails, subject, body, replyTo,
+          recipients, subject, body, replyTo,
           reason: "You're receiving this because you registered for a PTA event.",
           scope: 'event', meta: { eventId },
         });
@@ -475,11 +480,11 @@ function wireHandlers(isAdminHere) {
         try {
           await addDoc(collection(db, 'auditLog'), {
             actorUid: me.uid, actorName: me.displayName, action: 'event_email_sent',
-            eventId, subject, recipientCount: emails.length, createdAt: serverTimestamp(),
+            eventId, subject, recipientCount: recipients.length, createdAt: serverTimestamp(),
           });
         } catch (e) { /* non-fatal */ }
         closeOverlay();
-        toast(`Email queued to ${emails.length} ${emails.length === 1 ? 'person' : 'people'}.`);
+        toast(`Email queued to ${recipients.length} ${recipients.length === 1 ? 'person' : 'people'}.`);
       } catch (e) {
         btn.disabled = false; btn.textContent = 'Send email';
         toast('Could not send: ' + e.message);
