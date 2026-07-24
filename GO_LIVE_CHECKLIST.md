@@ -61,26 +61,23 @@ Steps once the group agrees on a domain name:
 - [ ] Add the new domain to **reCAPTCHA** domains (see item 1)
 - [ ] Attach the domain to **Firebase Hosting** (console → Hosting → Add custom domain)
 
-### 4. Scope the Storage write rules
-**Why:** `storage.rules` currently allows **any signed-in user to write to any path, at
-any size**. That means someone could overwrite another member's profile photo, or upload
-huge files (a real cost risk on the Blaze pay-as-you-go plan).
+### 4. Scope the Storage write rules — ✅ DONE (2026-07-24)
+Writes are now scoped per folder with size/type caps and Firestore-backed role
+checks: profile photos = owner only (image <8MB); event photos/attachments = that
+event's admins; cafe menu = Store Admin (PDF/image <25MB). Read already required
+sign-in. (storage.rules — published in the console.)
 
-Needs a review of the upload code (profile photo, event attachments/photos) so the rules
-can scope writes per-path and cap file size/type. Read access is already fixed
-(was public, now requires sign-in).
-
-### 5. Close the privacy/abuse gaps in Firestore rules
-**Why:** These are acceptable among a small trusted group, but not at community scale.
-
-- **Any signed-in user can read every user profile** — including email, phone/WhatsApp,
-  and real name. This means the **`anonymous` toggle is only cosmetic**: a determined
-  user reading raw data can see who posted anonymously. Decide whether that's acceptable
-  or whether profiles need field-level restriction.
-- **Anyone can create a notification addressed to anyone** (`notifications` create is
-  unrestricted) — a spam/impersonation vector once the user base grows.
-- **Cafe slot claim doesn't lock other fields** — a volunteer claiming an unclaimed extra
-  slot can silently alter its time/message in the same write.
+### 5. Close the privacy/abuse gaps in Firestore rules — partly done
+- ⬜ **STILL OPEN (this is Phase 2):** any signed-in user can read every user
+  profile — email, phone/WhatsApp, real name. The **`anonymous` toggle is only
+  cosmetic** as a result. Proper fix is a data-model change: split a public
+  profile (display name/photo) from private contact fields. ~half a day.
+- ✅ **DONE:** notification `from` must equal the sender's own display name
+  (no impersonation).
+- ✅ **DONE:** claiming a Cafe extra slot may change only `uid`+`name`, never
+  the slot's time/message.
+- ✅ **DONE (bonus):** audit-log entries can only be written by admins, self-
+  attributed. Event descriptions are sanitized on render (no stored XSS).
 
 ### 6. Decide what robots.txt should say
 **Why:** `robots.txt` currently tells **all** search engines not to index the site — right
