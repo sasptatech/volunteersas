@@ -123,11 +123,14 @@ service cloud.firestore {
     }
 
     // ---- outgoing email queue (Firebase "Trigger Email" extension sends these) ----
-    // Only admins may queue mail; the extension uses the Admin SDK and bypasses
-    // these rules to actually send. No client may read/update/delete the queue,
-    // so recipient lists and message contents stay server-side.
+    // Admins queue mail and can read it back for the Sent email view (which is
+    // how anyone sees what the system has sent). The extension uses the Admin
+    // SDK and bypasses these rules to do the actual sending and to write the
+    // `delivery` status back. Nobody may edit or delete a sent record, so the
+    // history stays trustworthy; regular members can't read the queue at all.
     match /mail/{mailId} {
       allow create: if isAnyAdminTier();
+      allow read: if isAnyAdminTier();
     }
 
     // ---- audit log (superadmin visibility only) ----

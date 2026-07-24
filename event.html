@@ -23,6 +23,7 @@ import { toast, showOverlay, closeOverlay, bubbleRowHtml, esc, renderHeader } fr
 import { renderChatPanel } from "./js/chat.js";
 import { renderAddToCalendar } from "./js/calendar.js";
 import { rteHtml, rteValue } from "./js/rte.js";
+import { queueEmails } from "./js/email.js";
 import { MAPPEDIN_LOCATIONS, mappedinLocationUrl, findMappedinLocation } from "./js/mappedin-locations.js";
 
 const root = document.getElementById('root');
@@ -448,9 +449,10 @@ function wireHandlers(isAdminHere) {
       <p style="font-size:13.5px;color:var(--ink-soft)">
         Sending to <strong>${emails.length}</strong> ${emails.length === 1 ? 'person' : 'people'} registered for "${esc(ev.title)}".
         ${notes.length ? `<br>(${notes.join(', ')} — not included.)` : ''}
-        <br>Recipients are BCC'd, so they can't see each other's addresses.
+        <br>Each person gets their own email — nobody sees anyone else's address.
       </p>
       <div class="form-row"><label>Subject</label><input id="emSubject" value="${esc(ev.title)} — a message from the organizers"></div>
+      <div class="form-row"><label>Replies go to</label><input id="emReplyTo" value="${esc((getProfile() || {}).email || '')}" placeholder="you@example.com"></div>
       <div class="form-row"><label>Message</label><textarea id="emBody" rows="7" placeholder="Write your message to everyone who registered…"></textarea></div>
       <button class="btn btn-primary" style="width:100%" id="confirmEmail">Send email</button>
     </div>`);
@@ -462,34 +464,13 @@ function wireHandlers(isAdminHere) {
       const btn = document.getElementById('confirmEmail');
       btn.disabled = true; btn.textContent = 'Sending…';
       const me = getProfile();
-      // Unsubscribe path: recipients turn off email in their own profile. Uses
-      // the current site origin so it stays correct if the domain later changes.
-      const prefsUrl = `${location.origin}/profile.html`;
-      const textFooter =
-        `\n\n— SAS PTA · VolunteerSAS\nYou're receiving this because you registered for a PTA event. ` +
-        `To stop receiving these emails, sign in and turn off email notifications in your profile: ${prefsUrl}`;
-      const htmlFooter =
-        `<br><br><hr style="border:none;border-top:1px solid #e5e0d8">` +
-        `<p style="font-size:12px;color:#8a857c;margin:0">— SAS PTA · VolunteerSAS<br>` +
-        `You're receiving this because you registered for a PTA event. ` +
-        `<a href="${prefsUrl}">Sign in and turn off email notifications</a> to stop receiving these.</p>`;
-      const mailDoc = {
-        bcc: emails,
-        message: {
-          subject,
-          text: body + textFooter,
-          // We deliberately DON'T set `from` — the Firebase extension's default
-          // sender is used, so swapping to the real PTA domain later is one config
-          // change with no code edit.
-          html: `<div style="font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.5;color:#1a1a1a">` +
-                `${esc(body).replace(/\n/g, '<br>')}${htmlFooter}</div>`,
-        },
-        // Metadata (ignored by the extension, kept for our own records):
-        eventId, sentByUid: me.uid, sentByName: me.displayName, createdAt: serverTimestamp(),
-      };
-      if (me.email) mailDoc.to = [me.email]; // sender gets a copy; group stays BCC
+      const replyTo = document.getElementById('emReplyTo').value.trim();
       try {
-        await addDoc(collection(db, 'mail'), mailDoc);
+        await queueEmails({
+          recipients: emails, subject, body, replyTo,
+          reason: "You're receiving this because you registered for a PTA event.",
+          scope: 'event', meta: { eventId },
+        });
         // Accountability trail (Superadmin-visible audit log).
         try {
           await addDoc(collection(db, 'auditLog'), {

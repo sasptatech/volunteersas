@@ -17,7 +17,7 @@
 import { watchAuth, getProfile, isSuperadmin, isAdmin, isStoreAdmin, isAnyAdminTier, ECOSYSTEMS } from "./js/auth.js";
 import {
   db, collection, doc, addDoc, updateDoc, deleteDoc, getDocs, getDoc, setDoc, onSnapshot,
-  serverTimestamp, query, where, storageRef, uploadBytes, getDownloadURL, deleteObject, arrayUnion
+  serverTimestamp, query, where, orderBy, limit, storageRef, uploadBytes, getDownloadURL, deleteObject, arrayUnion
 } from "./js/firebase-init.js";
 import { toast, showOverlay, closeOverlay, esc, renderHeader } from "./js/common.js";
 import { rteHtml, rteValue } from "./js/rte.js";
@@ -25,12 +25,13 @@ import { MAPPEDIN_LOCATIONS, findMappedinLocation } from "./js/mappedin-location
 import {
   SHIFT_TYPES, isSchoolDay, mondayOf, weekDates, dstr, fmtDayLabel, timeToMinutes
 } from "./js/cafe-dates.js";
+import { queueEmails } from "./js/email.js";
 
 const root = document.getElementById('root');
 let tab = 'events';
 let memberSortField = 'name';
 let memberSortDir = 'asc';
-let events = [], users = {}, hours = [], auditLog = [];
+let events = [], users = {}, hours = [], auditLog = [], sentMail = [];
 
 // ---- Cafe volunteers tab state ----
 // Regular AM/PM shifts seat two volunteers each (mirrors cafe.html).
@@ -60,6 +61,12 @@ function watchData() {
   });
   if (isAnyAdminTier()) onSnapshot(collection(db, 'hours'), snap => { hours = snap.docs.map(d => ({ id: d.id, ...d.data() })); render(); });
   if (isSuperadmin()) onSnapshot(collection(db, 'auditLog'), snap => { auditLog = snap.docs.map(d => ({ id: d.id, ...d.data() })); render(); });
+  // Sent email history. Capped because one send writes one doc per recipient.
+  if (isAnyAdminTier()) {
+    onSnapshot(query(collection(db, 'mail'), orderBy('createdAt', 'desc'), limit(800)), snap => {
+      sentMail = snap.docs.map(d => ({ id: d.id, ...d.data() })); render();
+    }, () => { /* rules not published yet — leave the tab empty rather than break */ });
+  }
   if (isStoreAdmin()) {
     onSnapshot(collection(db, 'cafeSignups'), snap => { cafeSignups = snap.docs.map(d => ({ id: d.id, ...d.data() })); render(); });
     onSnapshot(collection(db, 'cafeDayOverrides'), snap => {
@@ -80,6 +87,7 @@ async function logAudit(action, detail) {
 function render() {
   const tabs = [['events', '📅 Events'], ['hours', '⏱ Hours']];
   if (isStoreAdmin()) tabs.push(['cafe', '☕ Cafe volunteers']);
+  if (isAnyAdminTier()) tabs.push(['sent', '✉️ Sent email']);
   if (isAnyAdminTier()) tabs.push(['members', '👥 Members']);
   if (isSuperadmin()) tabs.push(['audit', '🗒 Audit log']);
 
@@ -96,6 +104,7 @@ function render() {
   if (tab === 'events') body.innerHTML = renderEventsTab();
   else if (tab === 'hours') body.innerHTML = renderHoursTab();
   else if (tab === 'cafe' && isStoreAdmin()) body.innerHTML = renderCafeTab();
+  else if (tab === 'sent' && isAnyAdminTier()) body.innerHTML = renderSentTab();
   else if (tab === 'members' && isAnyAdminTier()) body.innerHTML = renderMembersTab();
   else if (tab === 'audit' && isSuperadmin()) body.innerHTML = renderAuditTab();
   wireTabHandlers();
@@ -344,6 +353,58 @@ function renderMembersTab() {
           ${u.uid !== getProfile().uid ? `<button class="small-link" style="color:var(--red)" onclick="window.__removeMember('${u.uid}')">Delete from directory</button>` : '<span style="font-size:11.5px;color:var(--ink-soft)">You</span>'}
         </td>` : ''}
       </tr>`).join('') || `<tr><td colspan="${iAmSuperadmin ? 6 : 4}">No members yet.</td></tr>`}</tbody></table>
+  </div>`;
+}
+
+// One send writes one doc per recipient, so collapse them back by batchId.
+// Older single-doc sends have no batchId — those stand alone under their own id.
+function sentBatches() {
+  const groups = new Map();
+  sentMail.forEach(m => {
+    const key = m.batchId || m.id;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key, subject: m.subject || (m.message && m.message.subject) || '(no subject)',
+        scope: m.scope || '—', sentByName: m.sentByName || 'Unknown',
+        createdAt: m.createdAt, replyTo: m.replyTo || '',
+        body: (m.message && m.message.text) || '',
+        recipients: [], sent: 0, failed: 0, pending: 0,
+      });
+    }
+    const g = groups.get(key);
+    (m.to || m.bcc || []).forEach(a => g.recipients.push(a));
+    const state = m.delivery && m.delivery.state;
+    if (state === 'SUCCESS') g.sent++;
+    else if (state === 'ERROR') g.failed++;
+    else g.pending++;
+    if (!g.createdAt && m.createdAt) g.createdAt = m.createdAt;
+  });
+  return [...groups.values()].sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+}
+
+function renderSentTab() {
+  const batches = sentBatches();
+  return `<div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:12px">
+      Every email the system has sent. One row per send, however many people it went to.
+      Records can't be edited or deleted, so this is a reliable history.
+    </div>
+    <div class="card" style="padding:6px 16px;overflow-x:auto">
+    <table class="datatable"><thead><tr>
+      <th>When</th><th>Sent by</th><th>Subject</th><th>From</th><th>Recipients</th><th>Delivery</th><th></th>
+    </tr></thead>
+    <tbody>${batches.map(b => `<tr>
+      <td style="white-space:nowrap">${b.createdAt?.seconds ? esc(new Date(b.createdAt.seconds * 1000).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })) : '—'}</td>
+      <td>${esc(b.sentByName)}</td>
+      <td>${esc(b.subject)}</td>
+      <td>${b.scope === 'cafe' ? '☕ Cafe' : b.scope === 'event' ? '📅 Event' : '—'}</td>
+      <td>${b.recipients.length}</td>
+      <td style="white-space:nowrap">
+        ${b.sent ? `<span class="chip" style="background:#E3F3EC;color:#0E8A6D">${b.sent} sent</span> ` : ''}
+        ${b.pending ? `<span class="chip" style="background:#FDF1D8;color:#96721E">${b.pending} pending</span> ` : ''}
+        ${b.failed ? `<span class="chip" style="background:#FBE4E6;color:#B01C2E">${b.failed} failed</span>` : ''}
+      </td>
+      <td><button class="small-link" onclick="window.__viewSent('${b.key}')">View</button></td>
+    </tr>`).join('') || `<tr><td colspan="7" style="color:var(--ink-soft)">No email sent yet.</td></tr>`}</tbody></table>
   </div>`;
 }
 
@@ -616,9 +677,10 @@ function wireTabHandlers() {
         ${shiftCount} ${shiftCount === 1 ? 'shift' : 'shifts'} selected →
         sending to <strong>${emails.length}</strong> ${emails.length === 1 ? 'volunteer' : 'volunteers'} (one email each).
         ${notes.length ? `<br>(${notes.join(', ')} — not included.)` : ''}
-        <br>Recipients are BCC'd, so they can't see each other's addresses.
+        <br>Each person gets their own email — nobody sees anyone else's address.
       </p>
       <div class="form-row"><label>Subject</label><input id="cmSubject" value="PTA Cafe — a message for volunteers"></div>
+      <div class="form-row"><label>Replies go to</label><input id="cmReplyTo" value="${esc((getProfile() || {}).email || '')}" placeholder="you@example.com"></div>
       <div class="form-row"><label>Message</label><textarea id="cmBody" rows="7" placeholder="Write your message…"></textarea></div>
       <button class="btn btn-primary" style="width:100%" id="cmSend">Send email</button>
     </div>`);
@@ -629,27 +691,13 @@ function wireTabHandlers() {
       if (!body) { toast('Please write a message.'); return; }
       const btn = document.getElementById('cmSend');
       btn.disabled = true; btn.textContent = 'Sending…';
-      const me = getProfile();
-      const prefsUrl = `${location.origin}/profile.html`;
-      const mailDoc = {
-        bcc: emails,
-        message: {
-          subject,
-          // No `from` on purpose — the Trigger Email extension's default sender is
-          // used, so switching to the real PTA domain stays a config-only change.
-          text: `${body}\n\n— SAS PTA · VolunteerSAS\nYou're receiving this because you signed up for a PTA Cafe shift. To stop receiving these emails, sign in and turn off email notifications in your profile: ${prefsUrl}`,
-          html: `<div style="font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.5;color:#1a1a1a">`
-            + `${esc(body).replace(/\n/g, '<br>')}`
-            + `<br><br><hr style="border:none;border-top:1px solid #e5e0d8">`
-            + `<p style="font-size:12px;color:#8a857c;margin:0">— SAS PTA · VolunteerSAS<br>`
-            + `You're receiving this because you signed up for a PTA Cafe shift. `
-            + `<a href="${prefsUrl}">Sign in and turn off email notifications</a> to stop receiving these.</p></div>`,
-        },
-        scope: 'cafe', sentByUid: me.uid, sentByName: me.displayName, createdAt: serverTimestamp(),
-      };
-      if (me.email) mailDoc.to = [me.email]; // sender keeps a copy; the group stays BCC
+      const replyTo = document.getElementById('cmReplyTo').value.trim();
       try {
-        await addDoc(collection(db, 'mail'), mailDoc);
+        await queueEmails({
+          recipients: emails, subject, body, replyTo,
+          reason: "You're receiving this because you signed up for a PTA Cafe shift.",
+          scope: 'cafe',
+        });
         await logAudit('Emailed Cafe volunteers', `${emails.length} recipients — ${subject}`);
         closeOverlay();
         toast(`Email queued to ${emails.length} ${emails.length === 1 ? 'volunteer' : 'volunteers'}.`);
@@ -658,6 +706,32 @@ function wireTabHandlers() {
         toast('Could not send: ' + e.message);
       }
     };
+  };
+
+  window.__viewSent = (key) => {
+    const b = sentBatches().find(x => x.key === key);
+    if (!b) return;
+    const failures = sentMail
+      .filter(m => (m.batchId || m.id) === key && m.delivery && m.delivery.state === 'ERROR')
+      .map(m => `${(m.to || [])[0] || '?'}: ${esc((m.delivery.error || '').toString().slice(0, 200))}`);
+    showOverlay(`<div class="modal wide" style="position:relative">
+      <button class="close-x" onclick="closeOverlay()">✕</button>
+      <h2 style="margin-bottom:4px">${esc(b.subject)}</h2>
+      <div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:14px">
+        Sent by ${esc(b.sentByName)}
+        ${b.createdAt?.seconds ? ` · ${esc(new Date(b.createdAt.seconds * 1000).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }))}` : ''}
+        ${b.replyTo ? ` · replies to ${esc(b.replyTo)}` : ''}
+      </div>
+      <div class="form-row"><label>Message</label>
+        <div style="white-space:pre-wrap;font-size:13.5px;border:1.5px solid var(--line);border-radius:9px;padding:12px;max-height:280px;overflow:auto">${esc(b.body)}</div>
+      </div>
+      ${failures.length ? `<div class="form-row"><label style="color:var(--red)">Failed deliveries</label>
+        <div style="font-size:12.5px;border:1.5px solid var(--line);border-radius:9px;padding:12px;max-height:140px;overflow:auto">${failures.join('<br>')}</div>
+      </div>` : ''}
+      <div class="form-row"><label>Recipients (${b.recipients.length})</label>
+        <div style="font-size:12.5px;border:1.5px solid var(--line);border-radius:9px;padding:12px;max-height:200px;overflow:auto">${b.recipients.map(esc).join('<br>') || '—'}</div>
+      </div>
+    </div>`);
   };
 
   // ---- PTA Cafe menu files ----
