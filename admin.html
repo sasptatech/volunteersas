@@ -22,12 +22,26 @@ import {
 import { toast, showOverlay, closeOverlay, esc, renderHeader } from "./js/common.js";
 import { rteHtml, rteValue } from "./js/rte.js";
 import { MAPPEDIN_LOCATIONS, findMappedinLocation } from "./js/mappedin-locations.js";
+import {
+  SHIFT_TYPES, isSchoolDay, mondayOf, weekDates, dstr, fmtDayLabel, timeToMinutes
+} from "./js/cafe-dates.js";
 
 const root = document.getElementById('root');
 let tab = 'events';
 let memberSortField = 'name';
 let memberSortDir = 'asc';
 let events = [], users = {}, hours = [], auditLog = [];
+
+// ---- Cafe volunteers tab state ----
+// Regular AM/PM shifts seat two volunteers each (mirrors cafe.html).
+const CAFE_SHIFT_CAPACITY = 2;
+let cafeSignups = [], cafeOverrides = {};
+let cafeRange = 'week';                 // 'day' | 'week' | 'month'
+let cafeAnchor = dstr(new Date());      // any date inside the shown range
+let cafeSortField = 'date';             // 'date' | 'name' | 'empty'
+let cafeSortDir = 'asc';
+let cafeShowEmpty = true;               // show unfilled seats as their own rows
+let cafeSelected = new Set();           // selected volunteer UIDs (not rows — dedupes by person)
 
 watchAuth((profile, needsProfile) => {
   if (needsProfile) { location.href = 'index.html'; return; }
@@ -43,6 +57,12 @@ function watchData() {
   });
   if (isAnyAdminTier()) onSnapshot(collection(db, 'hours'), snap => { hours = snap.docs.map(d => ({ id: d.id, ...d.data() })); render(); });
   if (isSuperadmin()) onSnapshot(collection(db, 'auditLog'), snap => { auditLog = snap.docs.map(d => ({ id: d.id, ...d.data() })); render(); });
+  if (isStoreAdmin()) {
+    onSnapshot(collection(db, 'cafeSignups'), snap => { cafeSignups = snap.docs.map(d => ({ id: d.id, ...d.data() })); render(); });
+    onSnapshot(collection(db, 'cafeDayOverrides'), snap => {
+      cafeOverrides = {}; snap.docs.forEach(d => { cafeOverrides[d.id] = d.data().status; }); render();
+    });
+  }
 }
 
 async function logAudit(action, detail) {
@@ -52,6 +72,7 @@ async function logAudit(action, detail) {
 
 function render() {
   const tabs = [['events', '📅 Events'], ['hours', '⏱ Hours']];
+  if (isStoreAdmin()) tabs.push(['cafe', '☕ Cafe volunteers']);
   if (isAnyAdminTier()) tabs.push(['members', '👥 Members']);
   if (isSuperadmin()) tabs.push(['audit', '🗒 Audit log']);
 
@@ -67,6 +88,7 @@ function render() {
   const body = document.getElementById('tabBody');
   if (tab === 'events') body.innerHTML = renderEventsTab();
   else if (tab === 'hours') body.innerHTML = renderHoursTab();
+  else if (tab === 'cafe' && isStoreAdmin()) body.innerHTML = renderCafeTab();
   else if (tab === 'members' && isAnyAdminTier()) body.innerHTML = renderMembersTab();
   else if (tab === 'audit' && isSuperadmin()) body.innerHTML = renderAuditTab();
   wireTabHandlers();
@@ -95,6 +117,153 @@ function renderHoursTab() {
     <tbody>${rows.map(h => `<tr><td>${esc(h.volunteer)}</td><td>${esc(h.event)}</td><td>${esc(h.date)}</td><td>${h.hrs}</td>
         <td><button class="small-link" style="color:var(--red)" onclick="window.__removeHours('${h.id}')">Remove (no-show)</button></td></tr>`).join('') || `<tr><td colspan="5" style="color:var(--ink-soft)">No hours logged yet.</td></tr>`}</tbody></table>
   </div>`;
+}
+
+// ---------- Cafe volunteers ----------
+// One row per SEAT (filled or empty). Modelling it this way is what lets the same
+// list be sorted by date, by volunteer name, or by what's still unfilled.
+
+function cafeRangeDates() {
+  if (cafeRange === 'day') return [cafeAnchor];
+  if (cafeRange === 'week') return weekDates(mondayOf(cafeAnchor));
+  const [y, m] = cafeAnchor.split('-').map(Number);
+  const out = []; const d = new Date(y, m - 1, 1);
+  while (d.getMonth() === m - 1) { out.push(dstr(d)); d.setDate(d.getDate() + 1); }
+  return out;
+}
+
+function cafeRangeLabel() {
+  if (cafeRange === 'day') return fmtDayLabel(cafeAnchor);
+  if (cafeRange === 'week') { const w = weekDates(mondayOf(cafeAnchor)); return `${fmtDayLabel(w[0])} → ${fmtDayLabel(w[4])}`; }
+  const [y, m] = cafeAnchor.split('-').map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+}
+
+function cafeSeatRow(date, shiftLabel, timeLabel, startMin, signup, fallbackNote) {
+  const claimed = !!(signup && signup.uid);
+  const u = claimed ? users[signup.uid] : null;
+  return {
+    date, shiftLabel, timeLabel, startMin,
+    uid: claimed ? signup.uid : null,
+    name: claimed ? (signup.name || (u && u.displayName) || 'Unknown') : '',
+    email: u ? (u.email || '') : '',
+    optOut: !!(u && u.emailOptOut),
+    comment: (signup && signup.comment) || fallbackNote || '',
+    isEmpty: !claimed,
+  };
+}
+
+function cafeSeatRows() {
+  const rows = [];
+  cafeRangeDates().forEach(date => {
+    if (!isSchoolDay(date, cafeOverrides)) return;
+    SHIFT_TYPES.forEach(st => {
+      const taken = cafeSignups.filter(s => s.date === date && s.shift === st.id && !s.overflow);
+      const time = `${st.startTime}–${st.endTime}`;
+      const mins = timeToMinutes(st.startTime);
+      taken.forEach(s => rows.push(cafeSeatRow(date, st.label, time, mins, s)));
+      for (let i = taken.length; i < CAFE_SHIFT_CAPACITY; i++) rows.push(cafeSeatRow(date, st.label, time, mins, null));
+    });
+    // Each extra-slot doc is its own seat; uid stays null until someone claims it.
+    cafeSignups.filter(s => s.date === date && s.overflow).forEach(s => {
+      rows.push(cafeSeatRow(date, 'Extra slot', `${s.startTime || '?'}–${s.endTime || '?'}`, timeToMinutes(s.startTime), s, s.message));
+    });
+  });
+  return rows;
+}
+
+function cafeVisibleRows() {
+  let rows = cafeSeatRows();
+  if (!cafeShowEmpty) rows = rows.filter(r => !r.isEmpty);
+  const dir = cafeSortDir === 'asc' ? 1 : -1;
+  const byDate = (a, b) => a.date.localeCompare(b.date) || a.startMin - b.startMin;
+  rows.sort((a, b) => {
+    if (cafeSortField === 'name') {
+      // Empty seats always sink to the bottom, so the roster stays readable either way.
+      if (a.isEmpty !== b.isEmpty) return a.isEmpty ? 1 : -1;
+      return ((a.name || '').localeCompare(b.name || '') || byDate(a, b)) * dir;
+    }
+    if (cafeSortField === 'empty') {
+      if (a.isEmpty !== b.isEmpty) return (a.isEmpty ? -1 : 1) * dir;
+      return byDate(a, b);
+    }
+    return byDate(a, b) * dir;
+  });
+  return rows;
+}
+
+function cafeSortArrow(field) { return cafeSortField === field ? (cafeSortDir === 'asc' ? ' ▲' : ' ▼') : ''; }
+
+function renderCafeTab() {
+  const rows = cafeVisibleRows();
+  const filled = rows.filter(r => !r.isEmpty);
+  const emptyCount = rows.length - filled.length;
+  const uniquePeople = new Set(filled.map(r => r.uid)).size;
+
+  return `
+    <div class="card" style="padding:14px;margin-bottom:14px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+        ${['day', 'week', 'month'].map(r => `<button class="btn ${cafeRange === r ? 'btn-primary' : 'btn-ghost'}" onclick="window.__cafeRange('${r}')">${r[0].toUpperCase() + r.slice(1)}</button>`).join('')}
+        <button class="btn btn-ghost" onclick="window.__cafeNav(-1)">←</button>
+        <strong style="font-size:13.5px">${esc(cafeRangeLabel())}</strong>
+        <button class="btn btn-ghost" onclick="window.__cafeNav(1)">→</button>
+        <button class="small-link" onclick="window.__cafeToday()">Today</button>
+      </div>
+      <div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:10px">
+        ${filled.length} filled ${filled.length === 1 ? 'seat' : 'seats'} · ${uniquePeople} ${uniquePeople === 1 ? 'volunteer' : 'volunteers'} · ${emptyCount} still open
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <label style="display:flex;gap:6px;align-items:center;font-size:12.5px;font-weight:600">
+          <input type="checkbox" style="width:auto" ${cafeShowEmpty ? 'checked' : ''} onclick="window.__cafeToggleEmpty()"> Show empty slots
+        </label>
+        <button class="btn btn-ghost" onclick="window.__cafeSelectAll()">Select all shown</button>
+        <button class="btn btn-ghost" onclick="window.__cafeClearSel()">Clear selection</button>
+        <button class="btn btn-ghost" onclick="window.__cafeExport()">⬇ Export CSV</button>
+        <button class="btn btn-primary" onclick="window.__cafeEmail()">✉️ Email selected (${cafeSelected.size})</button>
+      </div>
+      <div style="font-size:12px;color:var(--ink-soft);margin-top:8px">
+        Selection is <strong>per volunteer</strong>, so someone on several shifts is only emailed once.
+        To email everyone on one day, switch to <strong>Day</strong>, pick the date, then “Select all shown”.
+      </div>
+    </div>
+
+    <div class="card" style="padding:6px 16px;overflow-x:auto">
+      <table class="datatable"><thead><tr>
+        <th></th>
+        <th><button class="small-link" onclick="window.__cafeSort('date')">Date${cafeSortArrow('date')}</button></th>
+        <th>Shift</th><th>Time</th>
+        <th><button class="small-link" onclick="window.__cafeSort('name')">Volunteer${cafeSortArrow('name')}</button></th>
+        <th>Email</th><th>Comment</th>
+        <th><button class="small-link" onclick="window.__cafeSort('empty')">Status${cafeSortArrow('empty')}</button></th>
+      </tr></thead>
+      <tbody>${rows.map(r => `<tr${r.isEmpty ? ' style="background:#FFFBF0"' : ''}>
+        <td>${r.isEmpty ? '' : `<input type="checkbox" style="width:auto" ${cafeSelected.has(r.uid) ? 'checked' : ''} onclick="window.__cafeToggleSel('${r.uid}')">`}</td>
+        <td style="white-space:nowrap">${esc(fmtDayLabel(r.date))}</td>
+        <td>${esc(r.shiftLabel)}</td>
+        <td style="white-space:nowrap">${esc(r.timeLabel)}</td>
+        <td>${r.isEmpty ? '<span style="color:var(--ink-soft)">— empty —</span>' : esc(r.name)}</td>
+        <td>${r.isEmpty ? '' : esc(r.email) + (r.optOut ? ' <span style="color:var(--ink-soft)">(opted out)</span>' : '')}</td>
+        <td>${esc(r.comment)}</td>
+        <td>${r.isEmpty
+          ? '<span class="chip" style="background:#FDF1D8;color:#96721E">Open</span>'
+          : '<span class="chip" style="background:#E3F3EC;color:#0E8A6D">Filled</span>'}</td>
+      </tr>`).join('') || `<tr><td colspan="8" style="color:var(--ink-soft)">No Cafe days in this range.</td></tr>`}</tbody></table>
+    </div>`;
+}
+
+function cafeCsv(rows) {
+  const q = v => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+  const lines = [['Date', 'Day', 'Shift', 'Time', 'Volunteer', 'Email', 'Comment', 'Status'].map(q).join(',')];
+  rows.forEach(r => lines.push([
+    r.date,
+    new Date(r.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long' }),
+    r.shiftLabel, r.timeLabel,
+    r.isEmpty ? '' : r.name,
+    r.isEmpty ? '' : r.email,
+    r.comment,
+    r.isEmpty ? 'Open' : 'Filled',
+  ].map(q).join(',')));
+  return lines.join('\r\n');
 }
 
 function roleRank(u) {
@@ -336,6 +505,111 @@ function wireTabHandlers() {
       await logAudit('Removed member', uid);
       toast('Member archived and removed.');
     } catch (e) { toast('Could not remove: ' + e.message); }
+  };
+
+  // ---- Cafe volunteers tab ----
+  window.__cafeRange = (r) => { cafeRange = r; render(); };
+  window.__cafeToday = () => { cafeAnchor = dstr(new Date()); render(); };
+  window.__cafeNav = (dir) => {
+    const d = new Date(cafeAnchor + 'T00:00:00');
+    if (cafeRange === 'day') d.setDate(d.getDate() + dir);
+    else if (cafeRange === 'week') d.setDate(d.getDate() + dir * 7);
+    else d.setMonth(d.getMonth() + dir);
+    cafeAnchor = dstr(d); render();
+  };
+  window.__cafeSort = (field) => {
+    if (cafeSortField === field) cafeSortDir = cafeSortDir === 'asc' ? 'desc' : 'asc';
+    else { cafeSortField = field; cafeSortDir = 'asc'; }
+    render();
+  };
+  window.__cafeToggleEmpty = () => { cafeShowEmpty = !cafeShowEmpty; render(); };
+  window.__cafeToggleSel = (uid) => {
+    if (cafeSelected.has(uid)) cafeSelected.delete(uid); else cafeSelected.add(uid);
+    render();
+  };
+  window.__cafeSelectAll = () => {
+    cafeVisibleRows().forEach(r => { if (!r.isEmpty) cafeSelected.add(r.uid); });
+    render();
+  };
+  window.__cafeClearSel = () => { cafeSelected.clear(); render(); };
+
+  window.__cafeExport = () => {
+    const rows = cafeVisibleRows();
+    if (!rows.length) { toast('Nothing to export.'); return; }
+    const blob = new Blob([cafeCsv(rows)], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `cafe-volunteers-${cafeRange}-${cafeAnchor}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    toast(`Exported ${rows.length} ${rows.length === 1 ? 'row' : 'rows'}.`);
+  };
+
+  window.__cafeEmail = () => {
+    if (!cafeSelected.size) { toast('Select at least one volunteer first.'); return; }
+    // cafeSelected holds UIDs, so a volunteer on several shifts is already only here once.
+    const recipients = []; let optedOut = 0, noEmail = 0;
+    cafeSelected.forEach(uid => {
+      const u = users[uid];
+      if (!u) { noEmail++; return; }
+      if (u.emailOptOut) { optedOut++; return; }
+      if (!u.email) { noEmail++; return; }
+      recipients.push(u.email);
+    });
+    const emails = [...new Set(recipients)]; // belt and braces against shared addresses
+    if (!emails.length) { toast('None of the selected volunteers can be emailed.'); return; }
+    const notes = [];
+    if (optedOut) notes.push(`${optedOut} opted out`);
+    if (noEmail) notes.push(`${noEmail} without an email`);
+    showOverlay(`<div class="modal" style="position:relative">
+      <button class="close-x" onclick="closeOverlay()">✕</button>
+      <h2>Email Cafe volunteers</h2>
+      <p style="font-size:13.5px;color:var(--ink-soft)">
+        Sending to <strong>${emails.length}</strong> ${emails.length === 1 ? 'volunteer' : 'volunteers'} — one email each, however many shifts they have.
+        ${notes.length ? `<br>(${notes.join(', ')} — not included.)` : ''}
+        <br>Recipients are BCC'd, so they can't see each other's addresses.
+      </p>
+      <div class="form-row"><label>Subject</label><input id="cmSubject" value="PTA Cafe — a message for volunteers"></div>
+      <div class="form-row"><label>Message</label><textarea id="cmBody" rows="7" placeholder="Write your message…"></textarea></div>
+      <button class="btn btn-primary" style="width:100%" id="cmSend">Send email</button>
+    </div>`);
+    document.getElementById('cmSend').onclick = async () => {
+      const subject = document.getElementById('cmSubject').value.trim();
+      const body = document.getElementById('cmBody').value.trim();
+      if (!subject) { toast('Please add a subject.'); return; }
+      if (!body) { toast('Please write a message.'); return; }
+      const btn = document.getElementById('cmSend');
+      btn.disabled = true; btn.textContent = 'Sending…';
+      const me = getProfile();
+      const prefsUrl = `${location.origin}/profile.html`;
+      const mailDoc = {
+        bcc: emails,
+        message: {
+          subject,
+          // No `from` on purpose — the Trigger Email extension's default sender is
+          // used, so switching to the real PTA domain stays a config-only change.
+          text: `${body}\n\n— SAS PTA · VolunteerSAS\nYou're receiving this because you signed up for a PTA Cafe shift. To stop receiving these emails, sign in and turn off email notifications in your profile: ${prefsUrl}`,
+          html: `<div style="font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.5;color:#1a1a1a">`
+            + `${esc(body).replace(/\n/g, '<br>')}`
+            + `<br><br><hr style="border:none;border-top:1px solid #e5e0d8">`
+            + `<p style="font-size:12px;color:#8a857c;margin:0">— SAS PTA · VolunteerSAS<br>`
+            + `You're receiving this because you signed up for a PTA Cafe shift. `
+            + `<a href="${prefsUrl}">Sign in and turn off email notifications</a> to stop receiving these.</p></div>`,
+        },
+        scope: 'cafe', sentByUid: me.uid, sentByName: me.displayName, createdAt: serverTimestamp(),
+      };
+      if (me.email) mailDoc.to = [me.email]; // sender keeps a copy; the group stays BCC
+      try {
+        await addDoc(collection(db, 'mail'), mailDoc);
+        await logAudit('Emailed Cafe volunteers', `${emails.length} recipients — ${subject}`);
+        closeOverlay();
+        toast(`Email queued to ${emails.length} ${emails.length === 1 ? 'volunteer' : 'volunteers'}.`);
+      } catch (e) {
+        btn.disabled = false; btn.textContent = 'Send email';
+        toast('Could not send: ' + e.message);
+      }
+    };
   };
 }
 </script>
