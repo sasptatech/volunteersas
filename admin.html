@@ -16,14 +16,14 @@
 <script type="module">
 import { watchAuth, getProfile, isSuperadmin, isAdmin, isStoreAdmin, isAnyAdminTier, ECOSYSTEMS } from "./js/auth.js";
 import {
-  db, collection, doc, addDoc, updateDoc, deleteDoc, getDocs, getDoc, onSnapshot,
-  serverTimestamp, query, where, storageRef, uploadBytes, getDownloadURL, arrayUnion
+  db, collection, doc, addDoc, updateDoc, deleteDoc, getDocs, getDoc, setDoc, onSnapshot,
+  serverTimestamp, query, where, storageRef, uploadBytes, getDownloadURL, deleteObject, arrayUnion
 } from "./js/firebase-init.js";
 import { toast, showOverlay, closeOverlay, esc, renderHeader } from "./js/common.js";
 import { rteHtml, rteValue } from "./js/rte.js";
 import { MAPPEDIN_LOCATIONS, findMappedinLocation } from "./js/mappedin-locations.js";
 import {
-  SHIFT_TYPES, isSchoolDay, mondayOf, weekDates, dstr, fmtDayLabel, timeToMinutes
+  SHIFT_TYPES, isSchoolDay, mondayOf, weekDates, dstr, fmtDayLabel, timeToMinutes, halfHourOptions
 } from "./js/cafe-dates.js";
 
 const root = document.getElementById('root');
@@ -41,7 +41,10 @@ let cafeAnchor = dstr(new Date());      // any date inside the shown range
 let cafeSortField = 'date';             // 'date' | 'name' | 'empty'
 let cafeSortDir = 'asc';
 let cafeShowEmpty = true;               // show unfilled seats as their own rows
-let cafeSelected = new Set();           // selected volunteer UIDs (not rows — dedupes by person)
+// Selection is per SEAT (keyed by cafeSignups doc id) so you can export specific
+// shifts. Email dedupes down to unique people at send time instead.
+let cafeSelected = new Set();
+let cafeMenu = { items: [] };           // settings/cafeMenu -> { items: [...] }
 
 watchAuth((profile, needsProfile) => {
   if (needsProfile) { location.href = 'index.html'; return; }
@@ -61,6 +64,10 @@ function watchData() {
     onSnapshot(collection(db, 'cafeSignups'), snap => { cafeSignups = snap.docs.map(d => ({ id: d.id, ...d.data() })); render(); });
     onSnapshot(collection(db, 'cafeDayOverrides'), snap => {
       cafeOverrides = {}; snap.docs.forEach(d => { cafeOverrides[d.id] = d.data().status; }); render();
+    });
+    onSnapshot(doc(db, 'settings', 'cafeMenu'), snap => {
+      cafeMenu = snap.exists() ? { items: snap.data().items || [] } : { items: [] };
+      render();
     });
   }
 }
@@ -144,6 +151,7 @@ function cafeSeatRow(date, shiftLabel, timeLabel, startMin, signup, fallbackNote
   const u = claimed ? users[signup.uid] : null;
   return {
     date, shiftLabel, timeLabel, startMin,
+    id: claimed ? signup.id : null,   // cafeSignups doc id — the selection key
     uid: claimed ? signup.uid : null,
     name: claimed ? (signup.name || (u && u.displayName) || 'Unknown') : '',
     email: u ? (u.email || '') : '',
@@ -199,8 +207,48 @@ function renderCafeTab() {
   const filled = rows.filter(r => !r.isEmpty);
   const emptyCount = rows.length - filled.length;
   const uniquePeople = new Set(filled.map(r => r.uid)).size;
+  const selectedShown = filled.filter(r => cafeSelected.has(r.id)).length;
+
+  const menuItems = cafeMenu.items || [];
 
   return `
+    <div class="card" style="padding:14px;margin-bottom:14px;border-left:4px solid var(--navy)">
+      <h3 style="margin-top:0;font-size:15px">Store Admin tools</h3>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-ghost" onclick="window.__cafeDayOverride('open')">Open store on a specific day</button>
+        <button class="btn btn-ghost" onclick="window.__cafeDayOverride('closed')">Close store on a specific day</button>
+        <button class="btn btn-ghost" onclick="window.__cafeExtraSlot()">Add extra slot with message</button>
+      </div>
+    </div>
+
+    <div class="card" style="padding:14px;margin-bottom:14px">
+      <h3 style="margin-top:0;font-size:15px">🍽️ PTA Cafe menu</h3>
+      <div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:10px">
+        Upload a PDF or image (e.g. regular menu, specials). Everything here shows on the
+        <a href="menu.html" class="small-link">PTA Cafe</a> page, in the order listed.
+      </div>
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
+        <div class="form-row" style="margin:0;flex:1;min-width:180px">
+          <label>Menu name</label><input id="cmName" placeholder="e.g. Regular menu">
+        </div>
+        <div class="form-row" style="margin:0;flex:1;min-width:180px">
+          <label>File (PDF or image)</label><input type="file" id="cmFile" accept="application/pdf,image/*">
+        </div>
+        <button class="btn btn-primary" id="cafeMenuUploadBtn">Upload</button>
+      </div>
+      ${menuItems.length ? `<table class="datatable"><thead><tr><th>Name</th><th>Type</th><th>Uploaded</th><th></th></tr></thead>
+        <tbody>${menuItems.map(m => `<tr>
+          <td>${esc(m.name)}</td>
+          <td>${m.type === 'pdf' ? '📄 PDF' : '🖼️ Image'}</td>
+          <td style="white-space:nowrap">${esc((m.uploadedAt || '').slice(0, 10))}</td>
+          <td style="white-space:nowrap">
+            <a class="small-link" href="${esc(m.url)}" target="_blank" rel="noopener">View</a>
+            <button class="small-link" style="color:var(--red)" onclick="window.__cafeMenuDelete('${esc(m.id)}')">Delete</button>
+          </td>
+        </tr>`).join('')}</tbody></table>`
+        : `<p style="color:var(--ink-soft);font-size:13px;margin:0">No menus uploaded yet.</p>`}
+    </div>
+
     <div class="card" style="padding:14px;margin-bottom:14px">
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
         ${['day', 'week', 'month'].map(r => `<button class="btn ${cafeRange === r ? 'btn-primary' : 'btn-ghost'}" onclick="window.__cafeRange('${r}')">${r[0].toUpperCase() + r.slice(1)}</button>`).join('')}
@@ -218,12 +266,13 @@ function renderCafeTab() {
         </label>
         <button class="btn btn-ghost" onclick="window.__cafeSelectAll()">Select all shown</button>
         <button class="btn btn-ghost" onclick="window.__cafeClearSel()">Clear selection</button>
-        <button class="btn btn-ghost" onclick="window.__cafeExport()">⬇ Export CSV</button>
-        <button class="btn btn-primary" onclick="window.__cafeEmail()">✉️ Email selected (${cafeSelected.size})</button>
+        <button class="btn btn-ghost" onclick="window.__cafeExport()">⬇ Export CSV${selectedShown ? ` (${selectedShown} selected)` : ' (all shown)'}</button>
+        <button class="btn btn-primary" onclick="window.__cafeEmail()">✉️ Email selected${selectedShown ? ` (${selectedShown})` : ''}</button>
       </div>
       <div style="font-size:12px;color:var(--ink-soft);margin-top:8px">
-        Selection is <strong>per volunteer</strong>, so someone on several shifts is only emailed once.
-        To email everyone on one day, switch to <strong>Day</strong>, pick the date, then “Select all shown”.
+        Ticking a row selects <strong>that shift only</strong>, so you can export a specific set of shifts.
+        Export uses your selection when you have one, otherwise everything shown.
+        Email still sends <strong>one message per person</strong> — picking three of someone's shifts emails them once.
       </div>
     </div>
 
@@ -237,7 +286,7 @@ function renderCafeTab() {
         <th><button class="small-link" onclick="window.__cafeSort('empty')">Status${cafeSortArrow('empty')}</button></th>
       </tr></thead>
       <tbody>${rows.map(r => `<tr${r.isEmpty ? ' style="background:#FFFBF0"' : ''}>
-        <td>${r.isEmpty ? '' : `<input type="checkbox" style="width:auto" ${cafeSelected.has(r.uid) ? 'checked' : ''} onclick="window.__cafeToggleSel('${r.uid}')">`}</td>
+        <td>${r.isEmpty ? '' : `<input type="checkbox" style="width:auto" ${cafeSelected.has(r.id) ? 'checked' : ''} onclick="window.__cafeToggleSel('${r.id}')">`}</td>
         <td style="white-space:nowrap">${esc(fmtDayLabel(r.date))}</td>
         <td>${esc(r.shiftLabel)}</td>
         <td style="white-space:nowrap">${esc(r.timeLabel)}</td>
@@ -523,18 +572,21 @@ function wireTabHandlers() {
     render();
   };
   window.__cafeToggleEmpty = () => { cafeShowEmpty = !cafeShowEmpty; render(); };
-  window.__cafeToggleSel = (uid) => {
-    if (cafeSelected.has(uid)) cafeSelected.delete(uid); else cafeSelected.add(uid);
+  window.__cafeToggleSel = (id) => {
+    if (cafeSelected.has(id)) cafeSelected.delete(id); else cafeSelected.add(id);
     render();
   };
   window.__cafeSelectAll = () => {
-    cafeVisibleRows().forEach(r => { if (!r.isEmpty) cafeSelected.add(r.uid); });
+    cafeVisibleRows().forEach(r => { if (!r.isEmpty) cafeSelected.add(r.id); });
     render();
   };
   window.__cafeClearSel = () => { cafeSelected.clear(); render(); };
 
   window.__cafeExport = () => {
-    const rows = cafeVisibleRows();
+    const shown = cafeVisibleRows();
+    // Export the selected shifts when there's a selection, otherwise everything shown.
+    const picked = shown.filter(r => !r.isEmpty && cafeSelected.has(r.id));
+    const rows = picked.length ? picked : shown;
     if (!rows.length) { toast('Nothing to export.'); return; }
     const blob = new Blob([cafeCsv(rows)], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -547,10 +599,13 @@ function wireTabHandlers() {
   };
 
   window.__cafeEmail = () => {
-    if (!cafeSelected.size) { toast('Select at least one volunteer first.'); return; }
-    // cafeSelected holds UIDs, so a volunteer on several shifts is already only here once.
+    if (!cafeSelected.size) { toast('Select at least one shift first.'); return; }
+    // Selection is per shift, so collapse to unique people before emailing —
+    // three shifts for the same volunteer must still be one message.
+    const selectedRows = cafeSeatRows().filter(r => !r.isEmpty && cafeSelected.has(r.id));
+    const uids = [...new Set(selectedRows.map(r => r.uid))];
     const recipients = []; let optedOut = 0, noEmail = 0;
-    cafeSelected.forEach(uid => {
+    uids.forEach(uid => {
       const u = users[uid];
       if (!u) { noEmail++; return; }
       if (u.emailOptOut) { optedOut++; return; }
@@ -562,11 +617,13 @@ function wireTabHandlers() {
     const notes = [];
     if (optedOut) notes.push(`${optedOut} opted out`);
     if (noEmail) notes.push(`${noEmail} without an email`);
+    const shiftCount = selectedRows.length;
     showOverlay(`<div class="modal" style="position:relative">
       <button class="close-x" onclick="closeOverlay()">✕</button>
       <h2>Email Cafe volunteers</h2>
       <p style="font-size:13.5px;color:var(--ink-soft)">
-        Sending to <strong>${emails.length}</strong> ${emails.length === 1 ? 'volunteer' : 'volunteers'} — one email each, however many shifts they have.
+        ${shiftCount} ${shiftCount === 1 ? 'shift' : 'shifts'} selected →
+        sending to <strong>${emails.length}</strong> ${emails.length === 1 ? 'volunteer' : 'volunteers'} (one email each).
         ${notes.length ? `<br>(${notes.join(', ')} — not included.)` : ''}
         <br>Recipients are BCC'd, so they can't see each other's addresses.
       </p>
@@ -610,6 +667,119 @@ function wireTabHandlers() {
         toast('Could not send: ' + e.message);
       }
     };
+  };
+
+  // ---- Store Admin tools (moved here from cafe.html) ----
+  window.__cafeDayOverride = (status) => {
+    showOverlay(`<div class="modal" style="position:relative">
+      <button class="close-x" onclick="closeOverlay()">✕</button>
+      <h2>${status === 'open' ? 'Open store on a day' : 'Close store on a day'}</h2>
+      <div class="form-row"><label>Date</label><input type="date" id="ovrDate"></div>
+      <button class="btn btn-primary" style="width:100%" id="ovrSave">Save</button>
+    </div>`);
+    document.getElementById('ovrSave').onclick = async () => {
+      const date = document.getElementById('ovrDate').value;
+      if (!date) { toast('Pick a date first.'); return; }
+      try {
+        await setDoc(doc(db, 'cafeDayOverrides', date), { status });
+        await logAudit(`Cafe day set ${status}`, date);
+        closeOverlay(); toast('Saved.');
+      } catch (e) { toast('Could not save: ' + e.message); }
+    };
+  };
+
+  window.__cafeExtraSlot = () => {
+    showOverlay(`<div class="modal" style="position:relative">
+      <button class="close-x" onclick="closeOverlay()">✕</button>
+      <h2>Add extra slot(s)</h2>
+      <div class="form-row"><label>Date</label><input type="date" id="exDate"></div>
+      <div class="form-row"><label>Message shown to volunteers</label><input id="exMsg" placeholder="e.g. Help with labeling new merchandise"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="form-row"><label>Start time</label>
+          <select id="exStart">${halfHourOptions().map(t => `<option value="${t}">${t}</option>`).join('')}</select>
+        </div>
+        <div class="form-row"><label>End time</label>
+          <select id="exEnd">${halfHourOptions().map((t, i) => `<option value="${t}" ${i === 2 ? 'selected' : ''}>${t}</option>`).join('')}</select>
+        </div>
+      </div>
+      <div class="form-row"><label>How many slots?</label><input type="number" min="1" value="1" id="exQty"></div>
+      <button class="btn btn-primary" style="width:100%" id="exSave">Add slot(s)</button>
+    </div>`);
+    document.getElementById('exSave').onclick = async () => {
+      const date = document.getElementById('exDate').value;
+      const message = document.getElementById('exMsg').value.trim();
+      const startTime = document.getElementById('exStart').value.trim();
+      const endTime = document.getElementById('exEnd').value.trim();
+      const qty = Math.max(1, parseInt(document.getElementById('exQty').value, 10) || 1);
+      if (!date || !message || !startTime || !endTime) { toast('Please fill in all fields.'); return; }
+      const groupId = 'extra_' + Date.now();
+      try {
+        for (let i = 0; i < qty; i++) {
+          await addDoc(collection(db, 'cafeSignups'), {
+            date, shift: 'extra', overflow: true, groupId, message, startTime, endTime,
+            uid: null, name: null, createdAt: serverTimestamp(),
+          });
+        }
+        closeOverlay(); toast(`${qty} extra slot${qty > 1 ? 's' : ''} added.`);
+      } catch (e) { toast('Could not add: ' + e.message); }
+    };
+  };
+
+  // ---- PTA Cafe menu files ----
+  const cafeMenuUploadBtn = document.getElementById('cafeMenuUploadBtn');
+  if (cafeMenuUploadBtn) cafeMenuUploadBtn.onclick = async () => {
+    const nameEl = document.getElementById('cmName');
+    const fileEl = document.getElementById('cmFile');
+    const name = nameEl.value.trim();
+    const file = fileEl.files && fileEl.files[0];
+    if (!name) { toast('Give the menu a name first.'); return; }
+    if (!file) { toast('Choose a PDF or image first.'); return; }
+    const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+    const isImage = (file.type || '').startsWith('image/');
+    if (!isPdf && !isImage) { toast('Only PDF or image files are supported.'); return; }
+    cafeMenuUploadBtn.disabled = true; cafeMenuUploadBtn.textContent = 'Uploading…';
+    try {
+      const { storage } = await import("./js/firebase-init.js");
+      const id = 'menu_' + Date.now();
+      const path = `cafeMenu/${id}_${file.name}`;
+      const r = storageRef(storage, path);
+      await uploadBytes(r, file);
+      const url = await getDownloadURL(r);
+      const item = {
+        id, name, url, path,
+        type: isPdf ? 'pdf' : 'image',
+        // serverTimestamp() can't be used inside an array element, so store an ISO string.
+        uploadedAt: new Date().toISOString(),
+        uploadedBy: getProfile().displayName,
+      };
+      await setDoc(doc(db, 'settings', 'cafeMenu'), { items: [...(cafeMenu.items || []), item] }, { merge: true });
+      await logAudit('Uploaded Cafe menu', name);
+      nameEl.value = ''; fileEl.value = '';
+      toast('Menu uploaded.');
+    } catch (e) {
+      toast('Could not upload: ' + e.message);
+    } finally {
+      cafeMenuUploadBtn.disabled = false; cafeMenuUploadBtn.textContent = 'Upload';
+    }
+  };
+
+  window.__cafeMenuDelete = async (id) => {
+    const item = (cafeMenu.items || []).find(m => m.id === id);
+    if (!item) return;
+    if (!confirm(`Delete "${item.name}" from the PTA Cafe page?`)) return;
+    try {
+      const remaining = (cafeMenu.items || []).filter(m => m.id !== id);
+      await setDoc(doc(db, 'settings', 'cafeMenu'), { items: remaining }, { merge: true });
+      // Drop the stored file too, so deleted menus don't linger in Storage.
+      if (item.path) {
+        try {
+          const { storage } = await import("./js/firebase-init.js");
+          await deleteObject(storageRef(storage, item.path));
+        } catch (e) { /* file already gone — the listing is what matters */ }
+      }
+      await logAudit('Deleted Cafe menu', item.name);
+      toast('Menu deleted.');
+    } catch (e) { toast('Could not delete: ' + e.message); }
   };
 }
 </script>

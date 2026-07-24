@@ -13,7 +13,7 @@ import {
   arrayUnion, arrayRemove, increment, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
-  getStorage, ref as storageRef, uploadBytes, getDownloadURL
+  getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 import { initializeAppCheck, ReCaptchaV3Provider } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app-check.js";
 
@@ -57,5 +57,5 @@ export {
   collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc,
   onSnapshot, query, where, orderBy, limit, serverTimestamp,
   arrayUnion, arrayRemove, increment, writeBatch,
-  storageRef, uploadBytes, getDownloadURL
+  storageRef, uploadBytes, getDownloadURL, deleteObject
 };
