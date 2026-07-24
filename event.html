@@ -19,7 +19,7 @@ import {
   db, doc, getDoc, updateDoc, deleteDoc, addDoc, collection, onSnapshot, query, where,
   serverTimestamp, arrayUnion, storageRef, uploadBytes, getDownloadURL
 } from "./js/firebase-init.js";
-import { toast, showOverlay, closeOverlay, bubbleRowHtml, esc, renderHeader } from "./js/common.js";
+import { toast, showOverlay, closeOverlay, bubbleRowHtml, esc, sanitizeHtml, renderHeader } from "./js/common.js";
 import { renderChatPanel } from "./js/chat.js";
 import { renderAddToCalendar } from "./js/calendar.js";
 import { rteHtml, rteValue } from "./js/rte.js";
@@ -132,7 +132,7 @@ function render() {
         <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--ink-soft)">${(ev.divisions || []).map(id => (ECOSYSTEMS.find(e => e.id === id) || {}).short || id).join(', ')}</div>
         <h1 class="serif" style="font-size:24px;margin:6px 0">${esc(ev.title || 'Untitled event')}</h1>
         <div style="font-size:13.5px;color:var(--ink-soft);margin-bottom:14px">📅 ${esc(ev.date || '')} ${ev.time ? '· ' + esc(ev.time) : ''} · 📍 ${renderLocation()}</div>
-        <div style="font-size:14px;line-height:1.6">${ev.description || ''}</div>
+        <div style="font-size:14px;line-height:1.6">${sanitizeHtml(ev.description || '')}</div>
       `}
       ${isAdminHere && !editing ? `<button class="btn btn-ghost" style="margin-top:10px" id="editBtn">✏️ Edit event</button>` : ''}
     </div>

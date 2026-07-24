@@ -1,9 +1,57 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+
+    function isSignedIn() { return request.auth != null; }
+
+    // Storage rules can read Firestore to check roles.
+    function profile() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+    function isSuperadmin() { return isSignedIn() && profile().isSuperadmin == true; }
+    function isStoreAdmin() { return isSignedIn() && (profile().isStoreAdmin == true || isSuperadmin()); }
+    function isEventAdmin(eventId) {
+      let ev = firestore.get(/databases/(default)/documents/events/$(eventId)).data;
+      return isSignedIn() && (request.auth.uid in ev.adminUids || isSuperadmin());
+    }
+
+    function isImage() { return request.resource.contentType.matches('image/.*'); }
+    function isPdfOrImage() {
+      return request.resource.contentType.matches('image/.*')
+          || request.resource.contentType == 'application/pdf';
+    }
+    // request.resource is null on delete, so size/type checks only apply to writes
+    // that actually upload a file. Deletes fall through to the auth check alone.
+    function isDelete() { return request.resource == null; }
+    function underMB(n) { return request.resource.size < n * 1024 * 1024; }
+
+    // Any signed-in user may read any file. (Download-URL tokens bypass rules
+    // anyway; this governs direct path access.) Writes are locked down per folder.
     match /{allPaths=**} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
+      allow read: if isSignedIn();
+    }
+
+    // A user's own profile photo. Path is exactly the uid.
+    match /profilePhotos/{uid} {
+      allow write: if isSignedIn() && request.auth.uid == uid
+        && (isDelete() || (isImage() && underMB(8)));
+    }
+
+    // Event photos + attachments — only that event's admins.
+    match /eventPhotos/{eventId}/{fileName} {
+      allow write: if isEventAdmin(eventId)
+        && (isDelete() || (isImage() && underMB(15)));
+    }
+    match /eventAttachments/{eventId}/{fileName} {
+      // Attachments are documents of many kinds, so type isn't restricted — only size.
+      allow write: if isEventAdmin(eventId)
+        && (isDelete() || underMB(25));
+    }
+
+    // PTA Cafe menu files — Store Admins only.
+    match /cafeMenu/{fileName} {
+      allow write: if isStoreAdmin()
+        && (isDelete() || (isPdfOrImage() && underMB(25)));
     }
   }
 }

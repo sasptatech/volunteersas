@@ -69,11 +69,14 @@ service cloud.firestore {
         (isStoreAdmin() && request.resource.data.uid == null)
       );
       // Owner managing their own, a Store Admin managing any, or a volunteer
-      // claiming a currently-unclaimed extra slot by setting their own uid.
+      // claiming a currently-unclaimed extra slot. On a claim the volunteer may
+      // set only their own uid + name — never rewrite the slot's time/message.
       allow update, delete: if isSignedIn() && (
         request.auth.uid == resource.data.uid ||
         isStoreAdmin() ||
-        (resource.data.uid == null && request.auth.uid == request.resource.data.uid)
+        (resource.data.uid == null
+          && request.auth.uid == request.resource.data.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['uid', 'name']))
       );
     }
 
@@ -119,7 +122,9 @@ service cloud.firestore {
     // ---- in-app notifications ----
     match /notifications/{notifId} {
       allow read, update: if isSignedIn() && request.auth.uid == resource.data.to;
-      allow create: if isSignedIn();
+      // Anyone signed in may notify anyone (e.g. "a volunteer cancelled"), but the
+      // `from` name must be the sender's own — no impersonating other people.
+      allow create: if isSignedIn() && request.resource.data.from == myProfile().displayName;
     }
 
     // ---- outgoing email queue (Firebase "Trigger Email" extension sends these) ----
@@ -134,9 +139,12 @@ service cloud.firestore {
     }
 
     // ---- audit log (superadmin visibility only) ----
+    // Only admins perform audited actions, so only admins may write entries, and
+    // only attributed to themselves. This keeps regular members from forging or
+    // spamming the trail superadmins rely on.
     match /auditLog/{logId} {
       allow read: if isSuperadmin();
-      allow create: if isSignedIn() && request.auth.uid == request.resource.data.actorUid;
+      allow create: if isAnyAdminTier() && request.auth.uid == request.resource.data.actorUid;
     }
 
     // ---- PTA Cafe menu + day overrides (Store Admin only) ----

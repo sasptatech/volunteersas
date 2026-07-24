@@ -6,6 +6,31 @@ export function esc(s) {
   return (s || "").replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 }
 
+// Sanitize rich-text HTML before injecting it with innerHTML. The event-description
+// editor is contenteditable, so pasted content could carry scripts, event handlers,
+// or javascript: links — this strips all of that down to a safe formatting subset.
+const RTE_ALLOWED = new Set(['B','STRONG','I','EM','U','A','UL','OL','LI','P','BR','DIV','SPAN','H3','H4']);
+const RTE_DROP = new Set(['SCRIPT','STYLE','IFRAME','OBJECT','EMBED','LINK','META','FORM','INPUT','BUTTON','SVG','TEMPLATE']);
+export function sanitizeHtml(html) {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = String(html || '');
+  tpl.content.querySelectorAll('*').forEach(el => {
+    const tag = el.tagName;
+    if (RTE_DROP.has(tag)) { el.remove(); return; }           // drop element + contents
+    if (!RTE_ALLOWED.has(tag)) { el.replaceWith(...el.childNodes); return; } // unwrap, keep text
+    [...el.attributes].forEach(a => {
+      const safeHref = tag === 'A' && a.name.toLowerCase() === 'href'
+        && /^(https?:|mailto:)/i.test(a.value.trim());
+      if (!safeHref) el.removeAttribute(a.name);              // strip on*, style, etc.
+    });
+    if (tag === 'A' && el.getAttribute('href')) {
+      el.setAttribute('target', '_blank');
+      el.setAttribute('rel', 'noopener noreferrer');
+    }
+  });
+  return tpl.innerHTML;
+}
+
 export function toast(msg) {
   const t = document.createElement('div');
   t.className = 'toast'; t.textContent = msg;
