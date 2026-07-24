@@ -1,5 +1,7 @@
 // cafe-dates.js — school-day/date helpers for PTA Cafe scheduling.
-export const SCHOOL_START = "2026-08-11";
+// First day the Cafe can operate. Aug 7 2026 is a Friday — the week of Aug 3
+// is therefore reachable in the week view, with only that Friday open.
+export const SCHOOL_START = "2026-08-07";
 export const SCHOOL_END = "2027-06-04";
 export const HOLIDAY_RANGES = [
   ["2026-08-10", "2026-08-10"],

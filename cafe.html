@@ -20,7 +20,7 @@ import {
   serverTimestamp
 } from "./js/firebase-init.js";
 import {
-  SHIFT_TYPES, SCHOOL_START, SCHOOL_END, isSchoolDay, mondayOf, weekDates, shiftWeek, fmtDayLabel, pad, timeToMinutes
+  SHIFT_TYPES, SCHOOL_START, SCHOOL_END, isSchoolDay, mondayOf, weekDates, shiftWeek, fmtDayLabel, pad, timeToMinutes, halfHourOptions
 } from "./js/cafe-dates.js";
 import { toast, showOverlay, closeOverlay, esc, renderHeader } from "./js/common.js";
 import { renderChatPanel } from "./js/chat.js";
@@ -89,10 +89,11 @@ function render() {
     <div id="cafeBody"></div>
 
     ${storeAdmin ? `<div class="card" style="padding:18px;margin-top:18px;border-left:4px solid var(--navy)">
-      <h3 style="margin-top:0">Store Admin tools</h3>
+      <h3 style="margin-top:0">Store Admin</h3>
       <div style="font-size:13px;color:var(--ink-soft)">
-        Opening/closing days, extra slots, the volunteer list and the menu all live on the
-        <a href="admin.html" class="small-link">Admin → Cafe volunteers</a> tab now.
+        Open/close a day and add extra shifts using the links on each day above.
+        The volunteer list, CSV export, emailing and the Cafe menu live on the
+        <a href="admin.html" class="small-link">Admin → Cafe volunteers</a> tab.
       </div>
     </div>` : ''}
 
@@ -124,14 +125,27 @@ function renderWeek() {
     <div style="font-weight:700;font-family:'Source Serif 4',serif">${label}</div>
     <button class="btn btn-ghost" ${atEnd ? 'disabled' : ''} id="nextWeek">Next week ›</button>
   </div><div class="grid">`;
+  const admin = isStoreAdmin();
   dates.forEach(date => {
     const dayLabel = fmtDayLabel(date);
     if (!isSchoolDay(date, dayOverrides)) {
-      out += `<div class="card" style="padding:14px;opacity:.6"><div style="font-weight:700;margin-bottom:4px">${dayLabel}</div><div style="font-size:12.5px;color:var(--ink-soft)">Store closed</div></div>`;
+      out += `<div class="card" style="padding:14px;background:#FAFAF8">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:4px">
+          <div style="font-weight:700;color:var(--ink-soft)">${dayLabel}</div>
+          ${admin ? `<button class="small-link" onclick="window.__cafeSetDay('${date}','open')">Open store</button>` : ''}
+        </div>
+        <div style="font-size:12.5px;color:var(--ink-soft)">Store closed</div>
+      </div>`;
       return;
     }
     out += `<div class="card" style="padding:14px">
-      <div style="font-weight:700;margin-bottom:10px">☕ ${dayLabel}</div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:10px">
+        <div style="font-weight:700">☕ ${dayLabel}</div>
+        ${admin ? `<div style="display:flex;gap:10px;white-space:nowrap">
+          <button class="small-link" onclick="window.__cafeSetDay('${date}','closed')">Close store</button>
+          <button class="small-link" onclick="window.__cafeAddShifts('${date}')">Add shifts</button>
+        </div>` : ''}
+      </div>
       ${dayBubbles(date).map(b => renderBubbleCard(date, b)).join('<div style="height:10px"></div>')}
     </div>`;
   });
@@ -204,6 +218,54 @@ function wireBodyHandlers(storeAdmin) {
   const next = document.getElementById('nextWeek'); if (next) next.onclick = () => { weekStart = shiftWeek(weekStart, 1); render(); };
 
   window.__jumpToWeek = (date) => { weekStart = mondayOf(date); view = 'week'; render(); };
+
+  // Store Admin controls, inline on the day they act on — no date to re-enter.
+  window.__cafeSetDay = async (date, status) => {
+    if (!isStoreAdmin()) return;
+    if (!confirm(`${status === 'open' ? 'Open' : 'Close'} the store on ${fmtDayLabel(date)}?`)) return;
+    try {
+      const { setDoc } = await import("./js/firebase-init.js");
+      await setDoc(doc(db, 'cafeDayOverrides', date), { status });
+      toast(`Store ${status === 'open' ? 'opened' : 'closed'} for ${fmtDayLabel(date)}.`);
+    } catch (e) { toast('Could not update: ' + e.message); }
+  };
+
+  window.__cafeAddShifts = (date) => {
+    if (!isStoreAdmin()) return;
+    showOverlay(`<div class="modal" style="position:relative">
+      <button class="close-x" onclick="closeOverlay()">✕</button>
+      <h2>Add extra slot(s)</h2>
+      <p style="font-size:13.5px;color:var(--ink-soft);margin-top:0">${esc(fmtDayLabel(date))}</p>
+      <div class="form-row"><label>Message shown to volunteers</label><input id="exMsg" placeholder="e.g. Help with labeling new merchandise"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="form-row"><label>Start time</label>
+          <select id="exStart">${halfHourOptions().map(t => `<option value="${t}">${t}</option>`).join('')}</select>
+        </div>
+        <div class="form-row"><label>End time</label>
+          <select id="exEnd">${halfHourOptions().map((t, i) => `<option value="${t}" ${i === 2 ? 'selected' : ''}>${t}</option>`).join('')}</select>
+        </div>
+      </div>
+      <div class="form-row"><label>How many slots?</label><input type="number" min="1" value="1" id="exQty"></div>
+      <button class="btn btn-primary" style="width:100%" id="exSave">Add slot(s)</button>
+    </div>`);
+    document.getElementById('exSave').onclick = async () => {
+      const message = document.getElementById('exMsg').value.trim();
+      const startTime = document.getElementById('exStart').value.trim();
+      const endTime = document.getElementById('exEnd').value.trim();
+      const qty = Math.max(1, parseInt(document.getElementById('exQty').value, 10) || 1);
+      if (!message) { toast('Please add a message for volunteers.'); return; }
+      const groupId = 'extra_' + Date.now();
+      try {
+        for (let i = 0; i < qty; i++) {
+          await addDoc(collection(db, 'cafeSignups'), {
+            date, shift: 'extra', overflow: true, groupId, message, startTime, endTime,
+            uid: null, name: null, createdAt: serverTimestamp(),
+          });
+        }
+        closeOverlay(); toast(`${qty} extra slot${qty > 1 ? 's' : ''} added.`);
+      } catch (e) { toast('Could not add: ' + e.message); }
+    };
+  };
 
   window.__openCafeSignup = (date, shift) => {
     const st = SHIFT_TYPES.find(s => s.id === shift);

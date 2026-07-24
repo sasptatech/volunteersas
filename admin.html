@@ -23,7 +23,7 @@ import { toast, showOverlay, closeOverlay, esc, renderHeader } from "./js/common
 import { rteHtml, rteValue } from "./js/rte.js";
 import { MAPPEDIN_LOCATIONS, findMappedinLocation } from "./js/mappedin-locations.js";
 import {
-  SHIFT_TYPES, isSchoolDay, mondayOf, weekDates, dstr, fmtDayLabel, timeToMinutes, halfHourOptions
+  SHIFT_TYPES, isSchoolDay, mondayOf, weekDates, dstr, fmtDayLabel, timeToMinutes
 } from "./js/cafe-dates.js";
 
 const root = document.getElementById('root');
@@ -212,15 +212,6 @@ function renderCafeTab() {
   const menuItems = cafeMenu.items || [];
 
   return `
-    <div class="card" style="padding:14px;margin-bottom:14px;border-left:4px solid var(--navy)">
-      <h3 style="margin-top:0;font-size:15px">Store Admin tools</h3>
-      <div style="display:flex;gap:10px;flex-wrap:wrap">
-        <button class="btn btn-ghost" onclick="window.__cafeDayOverride('open')">Open store on a specific day</button>
-        <button class="btn btn-ghost" onclick="window.__cafeDayOverride('closed')">Close store on a specific day</button>
-        <button class="btn btn-ghost" onclick="window.__cafeExtraSlot()">Add extra slot with message</button>
-      </div>
-    </div>
-
     <div class="card" style="padding:14px;margin-bottom:14px">
       <h3 style="margin-top:0;font-size:15px">🍽️ PTA Cafe menu</h3>
       <div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:10px">
@@ -666,62 +657,6 @@ function wireTabHandlers() {
         btn.disabled = false; btn.textContent = 'Send email';
         toast('Could not send: ' + e.message);
       }
-    };
-  };
-
-  // ---- Store Admin tools (moved here from cafe.html) ----
-  window.__cafeDayOverride = (status) => {
-    showOverlay(`<div class="modal" style="position:relative">
-      <button class="close-x" onclick="closeOverlay()">✕</button>
-      <h2>${status === 'open' ? 'Open store on a day' : 'Close store on a day'}</h2>
-      <div class="form-row"><label>Date</label><input type="date" id="ovrDate"></div>
-      <button class="btn btn-primary" style="width:100%" id="ovrSave">Save</button>
-    </div>`);
-    document.getElementById('ovrSave').onclick = async () => {
-      const date = document.getElementById('ovrDate').value;
-      if (!date) { toast('Pick a date first.'); return; }
-      try {
-        await setDoc(doc(db, 'cafeDayOverrides', date), { status });
-        await logAudit(`Cafe day set ${status}`, date);
-        closeOverlay(); toast('Saved.');
-      } catch (e) { toast('Could not save: ' + e.message); }
-    };
-  };
-
-  window.__cafeExtraSlot = () => {
-    showOverlay(`<div class="modal" style="position:relative">
-      <button class="close-x" onclick="closeOverlay()">✕</button>
-      <h2>Add extra slot(s)</h2>
-      <div class="form-row"><label>Date</label><input type="date" id="exDate"></div>
-      <div class="form-row"><label>Message shown to volunteers</label><input id="exMsg" placeholder="e.g. Help with labeling new merchandise"></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <div class="form-row"><label>Start time</label>
-          <select id="exStart">${halfHourOptions().map(t => `<option value="${t}">${t}</option>`).join('')}</select>
-        </div>
-        <div class="form-row"><label>End time</label>
-          <select id="exEnd">${halfHourOptions().map((t, i) => `<option value="${t}" ${i === 2 ? 'selected' : ''}>${t}</option>`).join('')}</select>
-        </div>
-      </div>
-      <div class="form-row"><label>How many slots?</label><input type="number" min="1" value="1" id="exQty"></div>
-      <button class="btn btn-primary" style="width:100%" id="exSave">Add slot(s)</button>
-    </div>`);
-    document.getElementById('exSave').onclick = async () => {
-      const date = document.getElementById('exDate').value;
-      const message = document.getElementById('exMsg').value.trim();
-      const startTime = document.getElementById('exStart').value.trim();
-      const endTime = document.getElementById('exEnd').value.trim();
-      const qty = Math.max(1, parseInt(document.getElementById('exQty').value, 10) || 1);
-      if (!date || !message || !startTime || !endTime) { toast('Please fill in all fields.'); return; }
-      const groupId = 'extra_' + Date.now();
-      try {
-        for (let i = 0; i < qty; i++) {
-          await addDoc(collection(db, 'cafeSignups'), {
-            date, shift: 'extra', overflow: true, groupId, message, startTime, endTime,
-            uid: null, name: null, createdAt: serverTimestamp(),
-          });
-        }
-        closeOverlay(); toast(`${qty} extra slot${qty > 1 ? 's' : ''} added.`);
-      } catch (e) { toast('Could not add: ' + e.message); }
     };
   };
 
