@@ -24,6 +24,7 @@ import { renderChatPanel } from "./js/chat.js";
 import { renderAddToCalendar } from "./js/calendar.js";
 import { rteHtml, rteValue } from "./js/rte.js";
 import { queueEmails } from "./js/email.js";
+import { eventComponents, slotLocation, componentConfigHtml, wireComponentConfig, readComponentConfig } from "./js/events.js";
 import { MAPPEDIN_LOCATIONS, mappedinLocationUrl, findMappedinLocation } from "./js/mappedin-locations.js";
 
 const root = document.getElementById('root');
@@ -100,17 +101,20 @@ function loadEvent() {
   });
   onSnapshot(query(collection(db, 'eventSlotSignups'), where('eventId', '==', eventId)), snap => {
     slotSignups = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    render();
+    hydrateUsers();
   });
   onSnapshot(query(collection(db, 'eventItemSignups'), where('eventId', '==', eventId)), snap => {
     itemSignups = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    render();
+    hydrateUsers();
   });
 }
 
 async function hydrateUsers() {
-  const needed = [...new Set(signups.map(s => s.uid))].filter(uid => !usersCache[uid]);
-  for (const uid of needed) {
+  // Hydrate everyone referenced by any sign-up type — attendees AND volunteers —
+  // so both bubble rows can show photos/anonymity.
+  const uids = [...new Set([...signups, ...slotSignups, ...itemSignups].map(s => s.uid).filter(Boolean))]
+    .filter(uid => !usersCache[uid]);
+  for (const uid of uids) {
     const s = await getDoc(doc(db, 'users', uid));
     if (s.exists()) usersCache[uid] = { uid, ...s.data() };
   }
@@ -133,6 +137,7 @@ function render() {
         <h1 class="serif" style="font-size:24px;margin:6px 0">${esc(ev.title || 'Untitled event')}</h1>
         <div style="font-size:13.5px;color:var(--ink-soft);margin-bottom:14px">📅 ${esc(ev.date || '')} ${ev.time ? '· ' + esc(ev.time) : ''} · 📍 ${renderLocation()}</div>
         <div style="font-size:14px;line-height:1.6">${sanitizeHtml(ev.description || '')}</div>
+        <div id="addCalEvent" style="margin-top:10px"></div>
       `}
       ${isAdminHere && !editing ? `<button class="btn btn-ghost" style="margin-top:10px" id="editBtn">✏️ Edit event</button>` : ''}
     </div>
@@ -166,10 +171,12 @@ function render() {
   </div>`;
 
   renderChatPanel('eventChat', 'event', eventId, { canModerate: isAdminHere });
-  renderAddToCalendar('addCalEvent', {
-    title: ev.title, date: ev.date, startTime: ev.time, durationHrs: 2,
-    location: ev.location, description: ev.description,
-  });
+  if (document.getElementById('addCalEvent')) {
+    renderAddToCalendar('addCalEvent', {
+      title: ev.title, date: ev.date, startTime: ev.time, durationHrs: 2,
+      location: ev.location, description: ev.description,
+    });
+  }
   wireHandlers(isAdminHere);
   if (isAdminHere) loadCoAdminPicker();
 }
@@ -184,75 +191,94 @@ function renderLocation() {
 }
 
 function renderParticipationSection(isAdminHere) {
-  const type = ev.type || 'standard';
-  if (type === 'save_the_date') {
+  const c = eventComponents(ev);
+  if (!c.rsvp && !c.slots && !c.items) {
+    // Save the Date — no components open yet.
     return `<div class="card" style="padding:18px;margin-top:16px">
       <p style="color:var(--ink-soft);font-size:13.5px;margin:0">📌 Save the date — sign-ups aren't open yet. Check back for details.</p>
-      <div id="addCalEvent"></div>
+      ${isAdminHere ? `<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-ghost" onclick="window.__openComponent('rsvpEnabled')">Open RSVP</button>
+        <button class="btn btn-ghost" onclick="window.__openComponent('volunteerSlotsEnabled')">Open volunteer slots</button>
+        <button class="btn btn-ghost" onclick="window.__openComponent('itemSignupEnabled')">Open item sign-up</button>
+      </div>
+      <div style="font-size:12px;color:var(--ink-soft);margin-top:6px">Use “Edit event” to set details (slots, capacity, etc.).</div>` : ''}
     </div>`;
   }
-  if (type === 'volunteer_slots') return renderSlotGroupsSection(isAdminHere);
-  if (type === 'item_signup') return renderItemCategoriesSection(isAdminHere);
+  return [
+    c.rsvp ? renderRsvpSection(isAdminHere) : '',
+    c.slots ? renderSlotGroupsSection(isAdminHere) : '',
+    c.items ? renderItemCategoriesSection(isAdminHere) : '',
+  ].join('');
+}
 
+function renderRsvpSection(isAdminHere) {
   const attendees = signups.map(s => usersCache[s.uid]).filter(Boolean);
+  const count = signups.length;
+  const cap = ev.rsvpCapacity || 0;
+  const full = cap > 0 && count >= cap;
   return `<div class="card" style="padding:18px;margin-top:16px">
-    <h3 style="margin-top:0">Who's going (${attendees.length})</h3>
+    <h3 style="margin-top:0">Attending (${count}${cap ? ' / ' + cap : ''})</h3>
     ${bubbleRowHtml(attendees, 20)}
     ${isAdminHere ? renderAttendeeAdminList(attendees) : ''}
     <div style="margin-top:14px">
       ${mySignup()
         ? `<button class="btn btn-ghost" id="unrsvpBtn">Un-RSVP</button>`
-        : `<button class="btn btn-primary" id="rsvpBtn">RSVP</button>`}
+        : (full
+          ? `<span class="chip" style="background:#E3F3EC;color:#0E8A6D">Event full</span>`
+          : `<button class="btn btn-primary" id="rsvpBtn">RSVP</button>`)}
     </div>
-    <div id="addCalEvent"></div>
   </div>`;
 }
 
 function renderSlotGroupsSection(isAdminHere) {
-  const groups = ev.slotGroups || [];
+  const groups = (ev.slotGroups || []);
+  const volunteers = slotSignups.map(s => usersCache[s.uid]).filter(Boolean);
   return `<div class="card" style="padding:18px;margin-top:16px">
-    <h3 style="margin-top:0">Volunteer slots</h3>
+    <h3 style="margin-top:0">Volunteering (${slotSignups.length})</h3>
+    ${volunteers.length ? bubbleRowHtml(volunteers, 20) : ''}
+    <div style="margin-top:${volunteers.length ? '12' : '0'}px">
     ${!groups.length ? `<p style="color:var(--ink-soft);font-size:13px">No slots have been set up yet.</p>` : groups.map(g => {
       const filled = slotSignups.filter(s => s.slotGroupId === g.id);
       const spotsLeft = g.capacity - filled.length;
+      const loc = slotLocation(ev, g);
       let rows = filled.map(s => `<div style="font-size:12.5px;padding:4px 0;display:flex;justify-content:space-between">
           <span><strong>${esc(s.name)}</strong>${s.comment ? ` — <span style="color:var(--ink-soft)">${esc(s.comment)}</span>` : ''}</span>
           ${s.uid === getProfile().uid || isAdminHere ? `<button class="small-link" style="color:var(--red)" onclick="window.__removeSlotSignup('${s.id}')">Remove</button>` : ''}
         </div>`).join('');
       for (let i = 0; i < spotsLeft; i++) rows += `<div style="font-size:12.5px;padding:4px 0;color:var(--ink-soft)">Open slot — <button class="small-link" onclick="window.__openSlotSignup('${g.id}')">Sign up</button></div>`;
       return `<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px">
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <span style="font-weight:600;font-size:13.5px">${esc(g.label)} <span style="color:var(--ink-soft);font-weight:400">(${esc(g.startTime)}–${esc(g.endTime)})</span></span>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+          <span style="font-weight:600;font-size:13.5px">${esc(g.label)} <span style="color:var(--ink-soft);font-weight:400">(${esc(g.startTime)}–${esc(g.endTime)})</span>${ev.multiLocation && loc ? `<br><span style="font-size:12px;color:var(--ink-soft);font-weight:400">📍 ${esc(loc)}</span>` : ''}</span>
           <span class="chip" style="background:${spotsLeft<=0?'#E3F3EC':'#FDF1D8'};color:${spotsLeft<=0?'#0E8A6D':'#96721E'}">${spotsLeft<=0?'Full':spotsLeft+' open'}</span>
         </div>
         <div style="margin-top:6px">${rows}</div>
       </div>`;
     }).join('')}
-    <div id="addCalEvent"></div>
+    </div>
   </div>`;
 }
 
 function renderItemCategoriesSection(isAdminHere) {
-  const cats = ev.itemCategories || [];
+  // Ordered by the admin's chosen priority; quota is display-only guidance and
+  // never blocks sign-up (people can go under or over the goal).
+  const cats = (ev.itemCategories || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
   return `<div class="card" style="padding:18px;margin-top:16px">
-    <h3 style="margin-top:0">What to bring</h3>
+    <h3 style="margin-top:0">Bring Something</h3>
     ${!cats.length ? `<p style="color:var(--ink-soft);font-size:13px">No items have been requested yet.</p>` : cats.map(c => {
       const signed = itemSignups.filter(s => s.categoryId === c.id);
-      const spotsLeft = c.quota - signed.length;
-      let rows = signed.map(s => `<div style="font-size:12.5px;padding:4px 0;display:flex;justify-content:space-between">
+      const rows = signed.map(s => `<div style="font-size:12.5px;padding:4px 0;display:flex;justify-content:space-between">
           <span><strong>${esc(s.name)}</strong> — ${esc(s.item)}</span>
           ${s.uid === getProfile().uid || isAdminHere ? `<button class="small-link" style="color:var(--red)" onclick="window.__removeItemSignup('${s.id}')">Remove</button>` : ''}
         </div>`).join('');
       return `<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px">
         <div style="display:flex;justify-content:space-between;align-items:center">
-          <span style="font-weight:600;font-size:13.5px">${esc(c.label)}</span>
-          <span class="chip" style="background:${spotsLeft<=0?'#E3F3EC':'#FDF1D8'};color:${spotsLeft<=0?'#0E8A6D':'#96721E'}">${signed.length}/${c.quota} claimed</span>
+          <span style="font-weight:600;font-size:13.5px">${esc(c.label)}${c.quota ? ` <span style="color:var(--ink-soft);font-weight:400">(goal: ${c.quota})</span>` : ''}</span>
+          <span class="chip" style="background:#EEF3F8;color:#33506E">${signed.length} signed up</span>
         </div>
         <div style="margin-top:6px">${rows}</div>
-        ${spotsLeft > 0 ? `<button class="btn btn-ghost" style="width:100%;margin-top:8px;font-size:12.5px" onclick="window.__openItemSignup('${c.id}')">+ Sign up to bring something</button>` : ''}
+        <button class="btn btn-ghost" style="width:100%;margin-top:8px;font-size:12.5px" onclick="window.__openItemSignup('${c.id}')">+ Sign up to bring something</button>
       </div>`;
     }).join('')}
-    <div id="addCalEvent"></div>
   </div>`;
 }
 
@@ -269,9 +295,7 @@ function renderAttendeeAdminList(attendees) {
 }
 
 function renderEditForm() {
-  const typeLabels = { standard: 'Standard (RSVP)', save_the_date: 'Save the Date', volunteer_slots: 'Volunteer Slots', item_signup: 'Item Sign-up' };
   return `
-    <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px">Event type: <strong>${typeLabels[ev.type || 'standard']}</strong> (set at creation, can't be changed here)</div>
     <div class="form-row"><label>Title</label><input id="edTitle" value="${esc(ev.title || '')}"></div>
     <div class="form-row"><label>Date</label><input id="edDate" type="date" value="${esc(ev.date || '')}"></div>
     <div class="form-row"><label>Time</label><input id="edTime" value="${esc(ev.time || '')}" placeholder="e.g. 9:00 AM"></div>
@@ -280,6 +304,7 @@ function renderEditForm() {
       <input list="mappedinDatalist" id="edMappedin" value="${ev.mappedinLocationId ? esc((findMappedinLocation(ev.mappedinLocationId) || {}).name || '') : ''}" placeholder="Start typing a room/location name…">
       <datalist id="mappedinDatalist">${MAPPEDIN_LOCATIONS.map(l => `<option value="${esc(l.name)}">`).join('')}</datalist>
     </div>
+    <div id="ecConfig">${componentConfigHtml(ev)}</div>
     <div class="form-row"><label>Description</label>${rteHtml('edDescRTE', ev.description || '')}</div>
     <div class="form-row"><label>Add attachments</label><input type="file" id="edAttachments" multiple></div>
     <div class="form-row"><label>Add photos</label><input type="file" id="edPhotos" multiple accept="image/*"></div>
@@ -295,9 +320,22 @@ function wireHandlers(isAdminHere) {
   if (editBtn) editBtn.onclick = () => { editing = true; render(); };
   const cancelBtn = document.getElementById('cancelEditBtn');
   if (cancelBtn) cancelBtn.onclick = () => { editing = false; render(); };
+
+  // Quick-enable a component straight from the Save-the-Date state.
+  window.__openComponent = async (field) => {
+    if (!myAdminHere()) return;
+    try { await updateDoc(doc(db, 'events', eventId), { [field]: true }); toast('Opened.'); }
+    catch (e) { toast('Could not open: ' + e.message); }
+  };
+
   const saveBtn = document.getElementById('saveEditBtn');
-  if (saveBtn) saveBtn.onclick = async () => {
+  if (saveBtn) {
+    // Edit form is on screen — wire its component config + division toggles.
+    wireComponentConfig(document.getElementById('root'));
+    document.querySelectorAll('#root .role-opt').forEach(b => b.onclick = () => b.classList.toggle('active'));
+    saveBtn.onclick = async () => {
     const divisions = [...document.querySelectorAll('#root .role-opt.active')].map(b => b.dataset.div);
+    const cfg = readComponentConfig();
     saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
     try {
       await updateDoc(doc(db, 'events', eventId), {
@@ -307,7 +345,7 @@ function wireHandlers(isAdminHere) {
         location: document.getElementById('edLoc').value.trim(),
         mappedinLocationId: (MAPPEDIN_LOCATIONS.find(l => l.name === document.getElementById('edMappedin').value.trim()) || {}).id || null,
         description: rteValue('edDescRTE'),
-        divisions,
+        divisions, ...cfg,
       });
       const { storage } = await import("./js/firebase-init.js");
       const attachFiles = [...document.getElementById('edAttachments').files];
@@ -326,7 +364,8 @@ function wireHandlers(isAdminHere) {
       }
       editing = false; toast('Event updated.');
     } catch (e) { toast('Could not save: ' + e.message); saveBtn.disabled = false; saveBtn.textContent = 'Save changes'; }
-  };
+    };
+  }
 
   const rsvpBtn = document.getElementById('rsvpBtn');
   if (rsvpBtn) rsvpBtn.onclick = async () => {
