@@ -7,8 +7,27 @@
 // The create form (admin.html) and the edit form (event.html) share ONE config
 // UI from here, so they never drift apart.
 import { esc } from "./common.js";
+import { db, storage, collection, query, where, getDocs, deleteDoc, doc, storageRef, deleteObject } from "./firebase-init.js";
 
-export const RSVP_DEFAULT_MAX_GUESTS = 1;
+// Delete an event and everything attached to it: all sign-ups (RSVP / slot /
+// item), its Storage media (cover, photos, docs), then the event doc itself.
+// Leaves logged volunteer `hours` alone — those are an org record, not per-event.
+export async function deleteEventFully(eventId, ev) {
+  for (const coll of ['signups', 'eventSlotSignups', 'eventItemSignups']) {
+    const snap = await getDocs(query(collection(db, coll), where('eventId', '==', eventId)));
+    for (const d of snap.docs) { try { await deleteDoc(d.ref); } catch (e) { /* keep going */ } }
+  }
+  const urls = [];
+  if (ev) {
+    if (ev.heroUrl) urls.push(ev.heroUrl);
+    (ev.photos || []).forEach(u => urls.push(u));
+    (ev.attachments || []).forEach(a => urls.push(a.url));
+  }
+  for (const u of urls) { try { await deleteObject(storageRef(storage, u)); } catch (e) { /* already gone */ } }
+  await deleteDoc(doc(db, 'events', eventId));
+}
+
+export const RSVP_DEFAULT_MAX_GUESTS = 0;   // extra guests beyond the attendee (0 = just them)
 export const RSVP_DEFAULT_CAPACITY = 100;
 
 export function eventComponents(ev) {
@@ -48,7 +67,7 @@ export function componentConfigHtml(ev) {
     <div data-ec-block="rsvp" style="display:${c.rsvp ? 'block' : 'none'};border-left:3px solid var(--line);padding-left:12px;margin-bottom:12px">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="form-row" style="margin:0"><label>Capacity (max attending)</label><input type="number" min="1" id="ecCapacity" value="${ev.rsvpCapacity || RSVP_DEFAULT_CAPACITY}"></div>
-        <div class="form-row" style="margin:0"><label>Max guests per person</label><input type="number" min="1" id="ecMaxGuests" value="${ev.rsvpMaxGuests || RSVP_DEFAULT_MAX_GUESTS}"></div>
+        <div class="form-row" style="margin:0"><label>Extra guests per RSVP (0 = just the person)</label><input type="number" min="0" id="ecMaxGuests" value="${ev.rsvpMaxGuests != null ? ev.rsvpMaxGuests : RSVP_DEFAULT_MAX_GUESTS}"></div>
       </div>
       <label style="display:flex;gap:8px;align-items:center;font-size:12.5px;margin-top:8px"><input type="checkbox" style="width:auto" id="ecRequireGuestNames" ${chk(ev.rsvpRequireGuestNames)}> Ask for each guest's name</label>
     </div>

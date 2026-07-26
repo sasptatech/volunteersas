@@ -24,8 +24,7 @@ import { renderChatPanel } from "./js/chat.js";
 import { renderAddToCalendar } from "./js/calendar.js";
 import { rteHtml, rteValue } from "./js/rte.js";
 import { queueEmails } from "./js/email.js";
-import { eventComponents, slotLocation, componentConfigHtml, wireComponentConfig, readComponentConfig } from "./js/events.js";
-import { MAPPEDIN_LOCATIONS, mappedinLocationUrl, findMappedinLocation } from "./js/mappedin-locations.js";
+import { eventComponents, slotLocation, componentConfigHtml, wireComponentConfig, readComponentConfig, deleteEventFully } from "./js/events.js";
 
 const root = document.getElementById('root');
 const params = new URLSearchParams(location.search);
@@ -162,6 +161,10 @@ function render() {
         <label style="font-size:12.5px;font-weight:600;color:var(--ink-soft)">Add a co-admin for this event</label>
         <div id="addCoAdminWrap" style="margin-top:6px">Loading eligible admins…</div>
       </div>
+      <div style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px">
+        <button class="small-link" style="color:var(--red)" id="deleteEventBtn">🗑 Delete this event</button>
+        <div style="font-size:11.5px;color:var(--ink-soft);margin-top:2px">Removes the event and all its sign-ups. Can't be undone.</div>
+      </div>
     </div>` : ''}
   </div>`;
 
@@ -200,11 +203,6 @@ function galleryHtml() {
 }
 
 function renderLocation() {
-  if (ev.mappedinLocationId) {
-    const loc = findMappedinLocation(ev.mappedinLocationId);
-    const label = loc ? loc.name : (ev.location || 'View on map');
-    return `<a href="${mappedinLocationUrl(ev.mappedinLocationId)}" target="_blank" class="small-link">${esc(label)} ↗</a>`;
-  }
   return esc(ev.location || '');
 }
 
@@ -229,13 +227,17 @@ function renderParticipationSection(isAdminHere) {
   ].join('');
 }
 
+// Total people attending = each RSVP (1) plus any guests they're bringing.
+function attendingCount() { return signups.reduce((n, s) => n + 1 + (s.guests || 0), 0); }
+
 function renderRsvpSection(isAdminHere) {
   const attendees = signups.map(s => usersCache[s.uid]).filter(Boolean);
-  const count = signups.length;
+  const count = attendingCount();
+  const guestTotal = count - signups.length;
   const cap = ev.rsvpCapacity || 0;
   const full = cap > 0 && count >= cap;
   return `<div class="card" style="padding:18px;margin-top:16px">
-    <h3 style="margin-top:0">Attending (${count}${cap ? ' / ' + cap : ''})</h3>
+    <h3 style="margin-top:0">Attending (${count}${cap ? ' / ' + cap : ''})${guestTotal > 0 ? ` <span style="font-weight:400;font-size:13px;color:var(--ink-soft)">incl. ${guestTotal} ${guestTotal === 1 ? 'guest' : 'guests'}</span>` : ''}</h3>
     ${bubbleRowHtml(attendees, 20)}
     ${isAdminHere ? renderAttendeeAdminList(attendees) : ''}
     <div style="margin-top:14px">
@@ -303,10 +305,17 @@ function renderItemCategoriesSection(isAdminHere) {
 function renderAttendeeAdminList(attendees) {
   return `<div style="margin-top:10px;border-top:1px solid var(--line);padding-top:10px">
     ${signups.map(s => {
-      const u = usersCache[s.uid]; if (!u) return '';
-      return `<div style="display:flex;justify-content:space-between;align-items:center;font-size:12.5px;padding:4px 0">
-        <span>${esc(u.anonymous ? 'Anonymous volunteer' : u.displayName)}</span>
-        <button class="small-link" style="color:var(--red)" onclick="window.__unrsvpOther('${s.id}','${s.uid}')">Un-RSVP</button>
+      const u = usersCache[s.uid];
+      const name = u ? (u.anonymous ? 'Anonymous' : u.displayName) : (s.name || 'Unknown');
+      const guests = s.guests || 0;
+      const guestNames = (s.guestNames || []).filter(Boolean);
+      return `<div style="font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--line)">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span><strong>${esc(name)}</strong>${guests > 0 ? ` <span style="color:var(--ink-soft)">+${guests} ${guests === 1 ? 'guest' : 'guests'}</span>` : ''}</span>
+          <button class="small-link" style="color:var(--red)" onclick="window.__unrsvpOther('${s.id}','${s.uid}')">Un-RSVP</button>
+        </div>
+        ${guestNames.length ? `<div style="color:var(--ink-soft);font-size:11.5px">Guests: ${esc(guestNames.join(', '))}</div>` : ''}
+        ${s.comment ? `<div style="color:var(--ink-soft);font-size:11.5px">💬 ${esc(s.comment)}</div>` : ''}
       </div>`;
     }).join('')}
   </div>`;
@@ -318,10 +327,6 @@ function renderEditForm() {
     <div class="form-row"><label>Date</label><input id="edDate" type="date" value="${esc(ev.date || '')}"></div>
     <div class="form-row"><label>Time</label><input id="edTime" value="${esc(ev.time || '')}" placeholder="e.g. 9:00 AM"></div>
     <div class="form-row"><label>Location</label><input id="edLoc" value="${esc(ev.location || '')}"></div>
-    <div class="form-row"><label>SAS Mappedin location (optional — type to search)</label>
-      <input list="mappedinDatalist" id="edMappedin" value="${ev.mappedinLocationId ? esc((findMappedinLocation(ev.mappedinLocationId) || {}).name || '') : ''}" placeholder="Start typing a room/location name…">
-      <datalist id="mappedinDatalist">${MAPPEDIN_LOCATIONS.map(l => `<option value="${esc(l.name)}">`).join('')}</datalist>
-    </div>
     <div id="ecConfig">${componentConfigHtml(ev)}</div>
     <div class="form-row"><label>Description</label>${rteHtml('edDescRTE', ev.description || '')}</div>
     <div class="form-row"><label>Cover image / PDF (shows at the top of the description)</label>
@@ -426,7 +431,6 @@ function wireHandlers(isAdminHere) {
         date: document.getElementById('edDate').value,
         time: document.getElementById('edTime').value.trim(),
         location: document.getElementById('edLoc').value.trim(),
-        mappedinLocationId: (MAPPEDIN_LOCATIONS.find(l => l.name === document.getElementById('edMappedin').value.trim()) || {}).id || null,
         description: rteValue('edDescRTE'),
         divisions, ...cfg,
         heroUrl, heroType, photos, attachments,
@@ -436,12 +440,58 @@ function wireHandlers(isAdminHere) {
     };
   }
 
-  const rsvpBtn = document.getElementById('rsvpBtn');
-  if (rsvpBtn) rsvpBtn.onclick = async () => {
+  const deleteEventBtn = document.getElementById('deleteEventBtn');
+  if (deleteEventBtn) deleteEventBtn.onclick = async () => {
+    if (!myAdminHere()) return;
+    if (!confirm(`Delete "${ev.title}" and all its sign-ups? This can't be undone.`)) return;
+    deleteEventBtn.disabled = true; deleteEventBtn.textContent = 'Deleting…';
     try {
-      await addDoc(collection(db, 'signups'), { eventId, uid: getProfile().uid, createdAt: serverTimestamp() });
-      toast('RSVP confirmed!');
-    } catch (e) { toast('Could not RSVP: ' + e.message); }
+      await deleteEventFully(eventId, ev);
+      toast('Event deleted.');
+      location.href = 'index.html';
+    } catch (e) { deleteEventBtn.disabled = false; deleteEventBtn.textContent = '🗑 Delete this event'; toast('Could not delete: ' + e.message); }
+  };
+
+  const rsvpBtn = document.getElementById('rsvpBtn');
+  if (rsvpBtn) rsvpBtn.onclick = () => window.__openRsvp();
+
+  window.__openRsvp = () => {
+    const maxExtra = ev.rsvpMaxGuests || 0;
+    const requireNames = !!ev.rsvpRequireGuestNames;
+    const opts = [];
+    for (let i = 0; i <= maxExtra; i++) opts.push(i);
+    showOverlay(`<div class="modal" style="position:relative">
+      <button class="close-x" onclick="closeOverlay()">✕</button>
+      <h2>RSVP — ${esc(ev.title || '')}</h2>
+      ${maxExtra > 0 ? `<div class="form-row"><label>Bringing guests?</label>
+        <select id="rsvpGuests">${opts.map(n => `<option value="${n}">${n === 0 ? 'Just me' : n + (n === 1 ? ' guest' : ' guests')}</option>`).join('')}</select>
+      </div><div id="rsvpGuestNames"></div>` : ''}
+      <div class="form-row"><label>Comment (optional — dietary notes, questions)</label><textarea id="rsvpComment" rows="2"></textarea></div>
+      <button class="btn btn-primary" style="width:100%" id="confirmRsvp">Confirm RSVP</button>
+    </div>`);
+    const renderNames = () => {
+      if (!requireNames || maxExtra <= 0) return;
+      const n = parseInt(document.getElementById('rsvpGuests').value, 10) || 0;
+      document.getElementById('rsvpGuestNames').innerHTML = Array.from({ length: n }, (_, i) =>
+        `<div class="form-row"><label>Guest ${i + 1} name</label><input class="rsvp-guest-name" placeholder="Name"></div>`).join('');
+    };
+    if (maxExtra > 0) { document.getElementById('rsvpGuests').onchange = renderNames; renderNames(); }
+    document.getElementById('confirmRsvp').onclick = async () => {
+      const guests = maxExtra > 0 ? (parseInt(document.getElementById('rsvpGuests').value, 10) || 0) : 0;
+      const guestNames = [...document.querySelectorAll('.rsvp-guest-name')].map(i => i.value.trim()).filter(Boolean);
+      if (requireNames && guests > 0 && guestNames.length < guests) { toast("Please enter each guest's name."); return; }
+      const cap = ev.rsvpCapacity || 0;
+      if (cap > 0 && attendingCount() + 1 + guests > cap) { toast('Not enough spots left for that group size.'); return; }
+      const btn = document.getElementById('confirmRsvp'); btn.disabled = true; btn.textContent = 'Confirming…';
+      try {
+        await addDoc(collection(db, 'signups'), {
+          eventId, uid: getProfile().uid, name: getProfile().displayName,
+          guests, guestNames, comment: document.getElementById('rsvpComment').value.trim(),
+          createdAt: serverTimestamp(),
+        });
+        closeOverlay(); toast('RSVP confirmed!');
+      } catch (e) { btn.disabled = false; btn.textContent = 'Confirm RSVP'; toast('Could not RSVP: ' + e.message); }
+    };
   };
   const unrsvpBtn = document.getElementById('unrsvpBtn');
   if (unrsvpBtn) unrsvpBtn.onclick = async () => {

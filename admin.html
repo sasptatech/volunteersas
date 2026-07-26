@@ -21,12 +21,11 @@ import {
 } from "./js/firebase-init.js";
 import { toast, showOverlay, closeOverlay, esc, renderHeader } from "./js/common.js";
 import { rteHtml, rteValue } from "./js/rte.js";
-import { MAPPEDIN_LOCATIONS, findMappedinLocation } from "./js/mappedin-locations.js";
 import {
   SHIFT_TYPES, isSchoolDay, mondayOf, weekDates, dstr, fmtDayLabel, timeToMinutes, shiftCapacity
 } from "./js/cafe-dates.js";
 import { queueEmails } from "./js/email.js";
-import { componentConfigHtml, wireComponentConfig, readComponentConfig } from "./js/events.js";
+import { componentConfigHtml, wireComponentConfig, readComponentConfig, deleteEventFully } from "./js/events.js";
 
 const root = document.getElementById('root');
 let tab = 'events';
@@ -496,10 +495,6 @@ function wireTabHandlers() {
       <div class="form-row"><label>Date</label><input type="date" id="neDate"></div>
       <div class="form-row"><label>Time</label><input id="neTime" placeholder="e.g. 9:00 AM"></div>
       <div class="form-row"><label>Location</label><input id="neLoc"></div>
-      <div class="form-row"><label>SAS Mappedin location (optional — type to search, makes the location name a clickable map link)</label>
-        <input list="mappedinDatalist" id="neMappedin" placeholder="Start typing a room/location name…">
-        <datalist id="mappedinDatalist">${MAPPEDIN_LOCATIONS.map(l => `<option value="${esc(l.name)}">`).join('')}</datalist>
-      </div>
       <div id="ecConfig">${componentConfigHtml({})}</div>
       <div class="form-row"><label>Description</label>${rteHtml('neDescRTE')}</div>
       <div class="form-row"><label>Cover image / PDF (shows at the top of the description — optional)</label><input type="file" id="neCover" accept="application/pdf,image/*"></div>
@@ -527,12 +522,9 @@ function wireTabHandlers() {
       const saveBtn = document.getElementById('neSave');
       saveBtn.disabled = true; saveBtn.textContent = 'Creating…';
       try {
-        const mappedinTyped = document.getElementById('neMappedin').value.trim();
-        const mappedinMatch = MAPPEDIN_LOCATIONS.find(l => l.name === mappedinTyped);
         const ref = await addDoc(collection(db, 'events'), {
           title, date, time: document.getElementById('neTime').value.trim(),
           location: document.getElementById('neLoc').value.trim(),
-          mappedinLocationId: mappedinMatch ? mappedinMatch.id : null,
           description, ...cfg,
           divisions, adminUids: [getProfile().uid], attachments: [], photos: [], createdAt: serverTimestamp(),
         });
@@ -566,9 +558,12 @@ function wireTabHandlers() {
   };
 
   window.__deleteEvent = async (id) => {
-    if (!confirm('Delete this event? This cannot be undone.')) return;
-    try { await deleteDoc(doc(db, 'events', id)); await logAudit('Deleted event', id); toast('Event deleted.'); }
-    catch (e) { toast('Could not delete: ' + e.message); }
+    if (!confirm('Delete this event and all its sign-ups? This cannot be undone.')) return;
+    try {
+      await deleteEventFully(id, events.find(e => e.id === id));
+      await logAudit('Deleted event', id);
+      toast('Event deleted.');
+    } catch (e) { toast('Could not delete: ' + e.message); }
   };
 
   window.__removeHours = async (id) => {
