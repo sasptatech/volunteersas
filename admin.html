@@ -116,7 +116,7 @@ function renderEventsTab() {
   return `
     <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
       <button class="btn btn-primary" id="newEventBtn">+ Create event</button>
-      ${isSuperadmin() ? `<button class="btn btn-ghost" id="seedEventsBtn">🌱 Seed sample events (dev)</button>` : ''}
+      ${isAnyAdminTier() ? `<button class="btn btn-ghost" id="seedEventsBtn">🌱 Seed sample events (dev)</button>` : ''}
     </div>
     <div class="grid">${mine.map(e => `
       <div class="card" style="padding:14px">
@@ -428,7 +428,7 @@ function wireTabHandlers() {
   // TEMPORARY dev helper — remove before launch. Superadmin-only.
   const seedBtn = document.getElementById('seedEventsBtn');
   if (seedBtn) seedBtn.onclick = async () => {
-    if (!isSuperadmin()) return;
+    if (!isAnyAdminTier()) return;
     if (!confirm('Create 6 sample events (new component model) for testing? Delete them when you\'re done.')) return;
     seedBtn.disabled = true; seedBtn.textContent = 'Seeding…';
     const base = { adminUids: [getProfile().uid], attachments: [], photos: [], createdAt: serverTimestamp() };
