@@ -17,7 +17,7 @@
 import { watchAuth, getProfile, isSuperadmin, isAnyAdminTier, ECOSYSTEMS } from "./js/auth.js";
 import {
   db, doc, getDoc, updateDoc, deleteDoc, addDoc, collection, onSnapshot, query, where,
-  serverTimestamp, arrayUnion, storageRef, uploadBytes, getDownloadURL
+  serverTimestamp, arrayUnion, storageRef, uploadBytes, getDownloadURL, deleteObject
 } from "./js/firebase-init.js";
 import { toast, showOverlay, closeOverlay, bubbleRowHtml, esc, sanitizeHtml, renderHeader } from "./js/common.js";
 import { renderChatPanel } from "./js/chat.js";
@@ -31,6 +31,8 @@ const root = document.getElementById('root');
 const params = new URLSearchParams(location.search);
 const eventId = params.get('id');
 let ev = null, signups = [], slotSignups = [], itemSignups = [], usersCache = {}, editing = false;
+// Media marked for removal in the edit form; applied on Save. Reset when editing starts.
+let mediaRemove = { hero: false, photos: [], attachments: [] };
 
 // Flip to true only once ALL of these are done: (1) Brevo account + a verified
 // sender, (2) the Firebase "Trigger Email from Firestore" extension installed and
@@ -136,6 +138,7 @@ function render() {
         <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--ink-soft)">${(ev.divisions || []).map(id => (ECOSYSTEMS.find(e => e.id === id) || {}).short || id).join(', ')}</div>
         <h1 class="serif" style="font-size:24px;margin:6px 0">${esc(ev.title || 'Untitled event')}</h1>
         <div style="font-size:13.5px;color:var(--ink-soft);margin-bottom:14px">📅 ${esc(ev.date || '')} ${ev.time ? '· ' + esc(ev.time) : ''} · 📍 ${renderLocation()}</div>
+        ${heroHtml()}
         <div style="font-size:14px;line-height:1.6">${sanitizeHtml(ev.description || '')}</div>
         <div id="addCalEvent" style="margin-top:10px"></div>
       `}
@@ -144,15 +147,7 @@ function render() {
 
     ${renderParticipationSection(isAdminHere)}
 
-    ${(ev.attachments || []).length ? `<div class="card" style="padding:18px;margin-top:16px">
-      <h3 style="margin-top:0">📎 Attachments</h3>
-      ${(ev.attachments || []).map(a => `<div style="font-size:13.5px;padding:4px 0"><a href="${esc(a.url)}" target="_blank" class="small-link">📄 ${esc(a.name)}</a></div>`).join('')}
-    </div>` : ''}
-
-    ${(ev.photos || []).length ? `<div class="card" style="padding:18px;margin-top:16px">
-      <h3 style="margin-top:0">📷 Photos</h3>
-      <div class="grid">${(ev.photos || []).map(url => `<div class="card" style="overflow:hidden;padding:0"><img src="${esc(url)}" style="width:100%;display:block"></div>`).join('')}</div>
-    </div>` : ''}
+    ${galleryHtml()}
 
     <div class="card" style="padding:18px;margin-top:16px">
       <h3 style="margin-top:0">💬 Discussion</h3>
@@ -179,6 +174,29 @@ function render() {
   }
   wireHandlers(isAdminHere);
   if (isAdminHere) loadCoAdminPicker();
+}
+
+// Cover media shown at the top of the description card (image inline, PDF embedded).
+function heroHtml() {
+  if (!ev.heroUrl) return '';
+  if (ev.heroType === 'pdf') {
+    return `<object data="${esc(ev.heroUrl)}" type="application/pdf" style="width:100%;height:60vh;min-height:340px;border:1px solid var(--line);border-radius:10px;margin-bottom:12px">
+      <a href="${esc(ev.heroUrl)}" target="_blank" class="small-link">Open the attached PDF ↗</a></object>`;
+  }
+  return `<img src="${esc(ev.heroUrl)}" alt="" style="width:100%;border-radius:10px;margin-bottom:12px;display:block">`;
+}
+
+// Additional photos + docs: thumbnail row. Photos open a blurred lightbox carousel.
+function galleryHtml() {
+  const photos = ev.photos || [], docs = ev.attachments || [];
+  if (!photos.length && !docs.length) return '';
+  return `<div class="card" style="padding:18px;margin-top:16px">
+    <h3 style="margin-top:0">More photos & documents</h3>
+    <div style="display:flex;flex-wrap:wrap;gap:10px">
+      ${photos.map((url, i) => `<div onclick="window.__lightbox(${i})" title="Click to enlarge" style="width:92px;height:92px;border-radius:8px;overflow:hidden;cursor:pointer;border:1px solid var(--line)"><img src="${esc(url)}" style="width:100%;height:100%;object-fit:cover;display:block"></div>`).join('')}
+      ${docs.map(d => `<a href="${esc(d.url)}" target="_blank" rel="noopener" style="width:92px;height:92px;border-radius:8px;border:1px solid var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;text-decoration:none;color:var(--ink);padding:6px;text-align:center"><div style="font-size:26px">📄</div><div style="font-size:10px;line-height:1.2;overflow:hidden;max-height:24px">${esc(d.name)}</div></a>`).join('')}
+    </div>
+  </div>`;
 }
 
 function renderLocation() {
@@ -306,8 +324,21 @@ function renderEditForm() {
     </div>
     <div id="ecConfig">${componentConfigHtml(ev)}</div>
     <div class="form-row"><label>Description</label>${rteHtml('edDescRTE', ev.description || '')}</div>
-    <div class="form-row"><label>Add attachments</label><input type="file" id="edAttachments" multiple></div>
-    <div class="form-row"><label>Add photos</label><input type="file" id="edPhotos" multiple accept="image/*"></div>
+    <div class="form-row"><label>Cover image / PDF (shows at the top of the description)</label>
+      ${ev.heroUrl ? `<div id="edHeroExisting" style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+        ${ev.heroType === 'pdf' ? '<span style="font-size:13px">📄 Current cover PDF</span>' : `<img src="${esc(ev.heroUrl)}" style="height:52px;border-radius:6px">`}
+        <button type="button" class="small-link" style="color:var(--red)" onclick="window.__markRemoveHero(this)">Remove</button>
+      </div>` : ''}
+      <input type="file" id="edCover" accept="application/pdf,image/*">
+    </div>
+    <div class="form-row"><label>Additional photos</label>
+      ${(ev.photos || []).length ? `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px">${(ev.photos || []).map((url, i) => `<div class="ed-existing-photo" style="position:relative;width:56px;height:56px"><img src="${esc(url)}" style="width:56px;height:56px;object-fit:cover;border-radius:6px;display:block"><button type="button" onclick="window.__markRemovePhoto(${i},this)" title="Remove" style="position:absolute;top:-7px;right:-7px;background:var(--red);color:#fff;border:none;border-radius:50%;width:20px;height:20px;line-height:1;cursor:pointer;font-size:11px">✕</button></div>`).join('')}</div>` : ''}
+      <input type="file" id="edPhotos" multiple accept="image/*">
+    </div>
+    <div class="form-row"><label>Additional documents</label>
+      ${(ev.attachments || []).length ? `<div style="margin-bottom:6px">${(ev.attachments || []).map((a, i) => `<div class="ed-existing-doc" style="font-size:12.5px;padding:2px 0">📄 ${esc(a.name)} <button type="button" class="small-link" style="color:var(--red)" onclick="window.__markRemoveDoc(${i},this)">remove</button></div>`).join('')}</div>` : ''}
+      <input type="file" id="edAttachments" multiple>
+    </div>
     <div class="form-row"><label>Divisions</label>
       <div class="role-grid">${ECOSYSTEMS.map(e => `<button type="button" class="role-opt ${((ev.divisions || []).includes(e.id)) ? 'active' : ''}" data-div="${e.id}">${e.icon} ${e.name}</button>`).join('')}</div>
     </div>
@@ -317,7 +348,7 @@ function renderEditForm() {
 
 function wireHandlers(isAdminHere) {
   const editBtn = document.getElementById('editBtn');
-  if (editBtn) editBtn.onclick = () => { editing = true; render(); };
+  if (editBtn) editBtn.onclick = () => { mediaRemove = { hero: false, photos: [], attachments: [] }; editing = true; render(); };
   const cancelBtn = document.getElementById('cancelEditBtn');
   if (cancelBtn) cancelBtn.onclick = () => { editing = false; render(); };
 
@@ -326,6 +357,27 @@ function wireHandlers(isAdminHere) {
     if (!myAdminHere()) return;
     try { await updateDoc(doc(db, 'events', eventId), { [field]: true }); toast('Opened.'); }
     catch (e) { toast('Could not open: ' + e.message); }
+  };
+
+  // Mark existing media for removal (applied on Save). Just hides the thumbnail.
+  window.__markRemoveHero = (btn) => { mediaRemove.hero = true; const el = document.getElementById('edHeroExisting'); if (el) el.style.display = 'none'; };
+  window.__markRemovePhoto = (i, btn) => { const u = (ev.photos || [])[i]; if (u) mediaRemove.photos.push(u); const c = btn.closest('.ed-existing-photo'); if (c) c.style.display = 'none'; };
+  window.__markRemoveDoc = (i, btn) => { const a = (ev.attachments || [])[i]; if (a) mediaRemove.attachments.push(a.url); const c = btn.closest('.ed-existing-doc'); if (c) c.style.display = 'none'; };
+
+  // Blurred full-screen lightbox carousel over the event's photos.
+  window.__lightbox = (index) => {
+    const photos = ev.photos || [];
+    if (!photos.length) return;
+    let i = index;
+    const show = () => showOverlay(`<div onclick="if(event.target===this)window.closeOverlay()" style="position:fixed;inset:0;background:rgba(20,18,15,.55);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;z-index:3000">
+        <button onclick="window.closeOverlay()" aria-label="Close" style="position:absolute;top:14px;right:20px;font-size:30px;background:none;border:none;color:#fff;cursor:pointer;line-height:1">✕</button>
+        ${photos.length > 1 ? `<button onclick="window.__lbNav(-1)" aria-label="Previous" style="position:absolute;left:12px;font-size:38px;background:none;border:none;color:#fff;cursor:pointer">‹</button>` : ''}
+        <img src="${esc(photos[i])}" style="max-width:90vw;max-height:86vh;border-radius:10px;box-shadow:0 12px 48px rgba(0,0,0,.5)">
+        ${photos.length > 1 ? `<button onclick="window.__lbNav(1)" aria-label="Next" style="position:absolute;right:12px;font-size:38px;background:none;border:none;color:#fff;cursor:pointer">›</button>` : ''}
+        ${photos.length > 1 ? `<div style="position:absolute;bottom:16px;color:#fff;font-size:13px">${i + 1} / ${photos.length}</div>` : ''}
+      </div>`, true);
+    window.__lbNav = (d) => { i = (i + d + photos.length) % photos.length; show(); };
+    show();
   };
 
   const saveBtn = document.getElementById('saveEditBtn');
@@ -338,6 +390,37 @@ function wireHandlers(isAdminHere) {
     const cfg = readComponentConfig();
     saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
     try {
+      const { storage } = await import("./js/firebase-init.js");
+      const tryDelete = async (url) => { try { await deleteObject(storageRef(storage, url)); } catch (e) { /* already gone */ } };
+
+      // Reconcile media: start from current arrays minus anything marked for removal.
+      let photos = (ev.photos || []).filter(u => !mediaRemove.photos.includes(u));
+      let attachments = (ev.attachments || []).filter(a => !mediaRemove.attachments.includes(a.url));
+      let heroUrl = ev.heroUrl || '', heroType = ev.heroType || '';
+      for (const u of mediaRemove.photos) tryDelete(u);
+      for (const u of mediaRemove.attachments) tryDelete(u);
+      if (mediaRemove.hero) { if (heroUrl) tryDelete(heroUrl); heroUrl = ''; heroType = ''; }
+
+      // New cover (replaces any existing).
+      const coverFile = document.getElementById('edCover').files[0];
+      if (coverFile) {
+        if (heroUrl) tryDelete(heroUrl);
+        const isPdf = coverFile.type === 'application/pdf' || /\.pdf$/i.test(coverFile.name);
+        const folder = isPdf ? 'eventAttachments' : 'eventPhotos';
+        const r = storageRef(storage, `${folder}/${eventId}/cover_${Date.now()}_${coverFile.name}`);
+        await uploadBytes(r, coverFile);
+        heroUrl = await getDownloadURL(r); heroType = isPdf ? 'pdf' : 'image';
+      }
+      // New additional photos + docs.
+      for (const file of [...document.getElementById('edPhotos').files]) {
+        const r = storageRef(storage, `eventPhotos/${eventId}/${Date.now()}_${file.name}`);
+        await uploadBytes(r, file); photos.push(await getDownloadURL(r));
+      }
+      for (const file of [...document.getElementById('edAttachments').files]) {
+        const r = storageRef(storage, `eventAttachments/${eventId}/${Date.now()}_${file.name}`);
+        await uploadBytes(r, file); attachments.push({ name: file.name, url: await getDownloadURL(r) });
+      }
+
       await updateDoc(doc(db, 'events', eventId), {
         title: document.getElementById('edTitle').value.trim(),
         date: document.getElementById('edDate').value,
@@ -346,22 +429,8 @@ function wireHandlers(isAdminHere) {
         mappedinLocationId: (MAPPEDIN_LOCATIONS.find(l => l.name === document.getElementById('edMappedin').value.trim()) || {}).id || null,
         description: rteValue('edDescRTE'),
         divisions, ...cfg,
+        heroUrl, heroType, photos, attachments,
       });
-      const { storage } = await import("./js/firebase-init.js");
-      const attachFiles = [...document.getElementById('edAttachments').files];
-      for (const file of attachFiles) {
-        const r = storageRef(storage, `eventAttachments/${eventId}/${Date.now()}_${file.name}`);
-        await uploadBytes(r, file);
-        const url = await getDownloadURL(r);
-        await updateDoc(doc(db, 'events', eventId), { attachments: arrayUnion({ name: file.name, url }) });
-      }
-      const photoFiles = [...document.getElementById('edPhotos').files];
-      for (const file of photoFiles) {
-        const r = storageRef(storage, `eventPhotos/${eventId}/${Date.now()}_${file.name}`);
-        await uploadBytes(r, file);
-        const url = await getDownloadURL(r);
-        await updateDoc(doc(db, 'events', eventId), { photos: arrayUnion(url) });
-      }
       editing = false; toast('Event updated.');
     } catch (e) { toast('Could not save: ' + e.message); saveBtn.disabled = false; saveBtn.textContent = 'Save changes'; }
     };

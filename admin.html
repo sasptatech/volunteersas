@@ -502,8 +502,9 @@ function wireTabHandlers() {
       </div>
       <div id="ecConfig">${componentConfigHtml({})}</div>
       <div class="form-row"><label>Description</label>${rteHtml('neDescRTE')}</div>
-      <div class="form-row"><label>Attachments (documents — optional)</label><input type="file" id="neAttachments" multiple></div>
-      <div class="form-row"><label>Photos (optional)</label><input type="file" id="neOwnPhotos" multiple accept="image/*"></div>
+      <div class="form-row"><label>Cover image / PDF (shows at the top of the description — optional)</label><input type="file" id="neCover" accept="application/pdf,image/*"></div>
+      <div class="form-row"><label>Additional documents (optional)</label><input type="file" id="neAttachments" multiple></div>
+      <div class="form-row"><label>Additional photos (optional)</label><input type="file" id="neOwnPhotos" multiple accept="image/*"></div>
       <div class="form-row"><label>Divisions</label>
         <div class="role-grid">${ECOSYSTEMS.map(e => `<button type="button" class="role-opt" data-div="${e.id}">${e.icon} ${e.name}</button>`).join('')}</div>
       </div>
@@ -536,6 +537,14 @@ function wireTabHandlers() {
           divisions, adminUids: [getProfile().uid], attachments: [], photos: [], createdAt: serverTimestamp(),
         });
         const { storage } = await import("./js/firebase-init.js");
+        const coverFile = document.getElementById('neCover').files[0];
+        if (coverFile) {
+          const isPdf = coverFile.type === 'application/pdf' || /\.pdf$/i.test(coverFile.name);
+          const folder = isPdf ? 'eventAttachments' : 'eventPhotos';
+          const cr = storageRef(storage, `${folder}/${ref.id}/cover_${Date.now()}_${coverFile.name}`);
+          await uploadBytes(cr, coverFile);
+          await updateDoc(doc(db, 'events', ref.id), { heroUrl: await getDownloadURL(cr), heroType: isPdf ? 'pdf' : 'image' });
+        }
         const attachFiles = [...document.getElementById('neAttachments').files];
         for (const file of attachFiles) {
           const r = storageRef(storage, `eventAttachments/${ref.id}/${Date.now()}_${file.name}`);
