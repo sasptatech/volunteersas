@@ -73,6 +73,24 @@ export function timeToMinutes(t) {
   if (ampm === 'am' && h === 12) h = 0;
   return h * 60 + min;
 }
+// Normalize a typed time ("07:05", "9:00 am", "14:30") to a consistent 12-hour
+// "H:MM AM/PM" string — the format the calendar export and My Schedule expect.
+// Anything unparseable is returned exactly as typed, so free text still survives.
+export function normalizeTime(str) {
+  str = (str || '').trim();
+  const m = str.match(/^(\d{1,2}):(\d{2})\s*(am|pm)?$/i);
+  if (!m) return str;
+  let h = parseInt(m[1], 10);
+  const min = parseInt(m[2], 10);
+  if (h > 23 || min > 59) return str;
+  const ap = m[3] ? m[3].toLowerCase() : null;
+  if (ap === 'pm' && h < 12) h += 12;
+  if (ap === 'am' && h === 12) h = 0;
+  const outAp = h < 12 ? 'AM' : 'PM';
+  let h12 = h % 12; if (h12 === 0) h12 = 12;
+  return `${h12}:${pad(min)} ${outAp}`;
+}
+
 // Half-hour time options from 6:00 AM to 6:00 PM, formatted consistently (e.g. "6:00 AM", "6:30 AM").
 export function halfHourOptions(startHour = 6, endHour = 18) {
   const out = [];

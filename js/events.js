@@ -7,6 +7,7 @@
 // The create form (admin.html) and the edit form (event.html) share ONE config
 // UI from here, so they never drift apart.
 import { esc } from "./common.js";
+import { halfHourOptions, normalizeTime } from "./cafe-dates.js";
 import { db, storage, collection, query, where, getDocs, deleteDoc, doc, storageRef, deleteObject } from "./firebase-init.js";
 
 // Delete an event and everything attached to it: all sign-ups (RSVP / slot /
@@ -75,6 +76,7 @@ export function componentConfigHtml(ev) {
     <div data-ec-block="slots" style="display:${c.slots ? 'block' : 'none'};border-left:3px solid var(--line);padding-left:12px;margin-bottom:12px">
       <label style="display:flex;gap:8px;align-items:center;font-size:12.5px;margin-bottom:8px"><input type="checkbox" style="width:auto" id="ecMultiLoc" data-ec-multiloc ${chk(ev.multiLocation)}> This event runs at multiple locations (set a location per slot)</label>
       <label style="font-size:12.5px;font-weight:600;color:var(--ink-soft)">Volunteer slot groups</label>
+      <datalist id="ecHalfHours">${halfHourOptions(6, 21).map(t => `<option value="${t}">`).join('')}</datalist>
       <div id="ecSlotRows" style="margin-top:6px">${groups.map(g => slotRowHtml(g, ev.multiLocation)).join('')}</div>
       <button type="button" class="btn btn-ghost" data-ec-addslot style="margin-top:6px">+ Add slot group</button>
     </div>
@@ -90,8 +92,8 @@ function slotRowHtml(g, multiLoc) {
   g = g || {};
   return `<div class="ec-slot-row" data-id="${esc(g.id || '')}" style="display:grid;grid-template-columns:2fr 1fr 1fr .8fr auto;gap:6px;margin-bottom:6px;align-items:center">
     <input placeholder="Label (e.g. Decorating)" class="ec-sg-label" value="${esc(g.label || '')}">
-    <input placeholder="Start (e.g. 9:00 AM)" class="ec-sg-start" value="${esc(g.startTime || '')}">
-    <input placeholder="End (e.g. 10:00 AM)" class="ec-sg-end" value="${esc(g.endTime || '')}">
+    <input list="ecHalfHours" placeholder="Start (e.g. 9:00 AM)" class="ec-sg-start" value="${esc(g.startTime || '')}">
+    <input list="ecHalfHours" placeholder="End (e.g. 10:00 AM)" class="ec-sg-end" value="${esc(g.endTime || '')}">
     <input type="number" min="1" class="ec-sg-cap" value="${g.capacity || 2}">
     <button type="button" class="btn btn-ghost" style="padding:6px 10px" onclick="this.closest('.ec-slot-row').remove()">✕</button>
     <input placeholder="Location for this slot" class="ec-sg-loc" value="${esc(g.location || '')}" style="grid-column:1 / -1;display:${multiLoc ? 'block' : 'none'}">
@@ -153,8 +155,8 @@ export function readComponentConfig() {
     const g = {
       id: row.dataset.id || ('sg' + Date.now() + '_' + i),
       label: row.querySelector('.ec-sg-label').value.trim(),
-      startTime: row.querySelector('.ec-sg-start').value.trim(),
-      endTime: row.querySelector('.ec-sg-end').value.trim(),
+      startTime: normalizeTime(row.querySelector('.ec-sg-start').value),
+      endTime: normalizeTime(row.querySelector('.ec-sg-end').value),
       capacity: parseInt(row.querySelector('.ec-sg-cap').value, 10) || 1,
     };
     const loc = row.querySelector('.ec-sg-loc').value.trim();
