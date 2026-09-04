@@ -87,12 +87,11 @@ The whole app is behind a sign-in gate, so there's no public content to index an
 no reason to surface the login page in search. `Disallow: /` is kept deliberately
 (documented in robots.txt). Revisit only if the PTA ever wants it search-findable.
 
-### 7. Retire Netlify — ⬜ USER ACTION (safe to do now)
-Firebase Hosting is proven, so shut Netlify down:
-- app.netlify.com → site `delightful-daifuku-1155c1` → **Delete this site** (or Build &
-  deploy → **Stop builds** to keep it as a fallback first).
-- Remove `delightful-daifuku-1155c1.netlify.app` from the reCAPTCHA domains.
-- Nothing to change in the repo (no Netlify config was ever committed).
+### 7. Retire Netlify — ✅ DONE
+Netlify site `delightful-daifuku-1155c1` deleted; its reCAPTCHA domain removed.
+Hosting is Firebase-only now (auto-deploys via the GitHub Action, independent of
+Netlify). A stray `saspta` Netlify site (unrelated pre-rename experiment) was also
+deleted.
 
 **Dev buttons:** the temporary superadmin seed + backfill buttons were removed
 before launch (commit a87e697).
@@ -136,8 +135,7 @@ Non-disruptive to add later; `.web.app` keeps working alongside it.
 | Thing | Where |
 |---|---|
 | Repo | github.com/sasptatech/volunteersas (auto-deploys from `main`) |
-| Hosting | Firebase Hosting → https://sasptavolunteer.web.app |
-| Old hosting | Netlify → delightful-daifuku-1155c1.netlify.app (being retired) |
+| Hosting | Firebase Hosting → https://sasptavolunteer.web.app (Netlify retired) |
 | Firebase project | `sasptavolunteer` (Blaze plan), Firestore in `asia-southeast1` |
 | Email sending | Brevo (free tier) + Firebase "Trigger Email from Firestore" extension |
 | Email queue | Firestore `mail` collection (admins only can write) |
