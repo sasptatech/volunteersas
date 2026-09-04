@@ -67,11 +67,14 @@ checks: profile photos = owner only (image <8MB); event photos/attachments = tha
 event's admins; cafe menu = Store Admin (PDF/image <25MB). Read already required
 sign-in. (storage.rules — published in the console.)
 
-### 5. Close the privacy/abuse gaps in Firestore rules — partly done
-- ⬜ **STILL OPEN (this is Phase 2):** any signed-in user can read every user
-  profile — email, phone/WhatsApp, real name. The **`anonymous` toggle is only
-  cosmetic** as a result. Proper fix is a data-model change: split a public
-  profile (display name/photo) from private contact fields. ~half a day.
+### 5. Close the privacy/abuse gaps in Firestore rules — ✅ DONE (2026-09-…)
+- ✅ **Profile privacy (Phase 2) — BUILT (commit 53fbbe0).** Split into
+  `publicProfiles/{uid}` (name/photo/anonymous + advisory role flags, member-
+  readable) vs `users/{uid}` (email/phone, self+admin only). Anonymous users are
+  blanked in the public mirror, so anonymity is real. **Activation (once):
+  publish the updated firestore.rules, then Admin → Events → 🔁 Backfill public
+  profiles as Superadmin.** Residual: volunteers' names still show on their slot
+  rows (embedded at sign-up).
 - ✅ **DONE:** notification `from` must equal the sender's own display name
   (no impersonation).
 - ✅ **DONE:** claiming a Cafe extra slot may change only `uid`+`name`, never
