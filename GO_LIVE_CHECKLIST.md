@@ -82,15 +82,20 @@ sign-in. (storage.rules — published in the console.)
 - ✅ **DONE (bonus):** audit-log entries can only be written by admins, self-
   attributed. Event descriptions are sanitized on render (no stored XSS).
 
-### 6. Decide what robots.txt should say
-**Why:** `robots.txt` currently tells **all** search engines not to index the site — right
-for an invite-only soft launch. For a public launch you probably want the landing page
-findable. Revisit before announcing.
+### 6. robots.txt — ✅ DECIDED: keep blocking all crawlers
+The whole app is behind a sign-in gate, so there's no public content to index and
+no reason to surface the login page in search. `Disallow: /` is kept deliberately
+(documented in robots.txt). Revisit only if the PTA ever wants it search-findable.
 
-### 7. Retire Netlify
-**Why:** Two live copies of the site is confusing and doubles the places to update.
-Once Firebase Hosting is proven, shut the Netlify deploy down — and remove its domain
-from the reCAPTCHA list at the same time.
+### 7. Retire Netlify — ⬜ USER ACTION (safe to do now)
+Firebase Hosting is proven, so shut Netlify down:
+- app.netlify.com → site `delightful-daifuku-1155c1` → **Delete this site** (or Build &
+  deploy → **Stop builds** to keep it as a fallback first).
+- Remove `delightful-daifuku-1155c1.netlify.app` from the reCAPTCHA domains.
+- Nothing to change in the repo (no Netlify config was ever committed).
+
+**Dev buttons:** the temporary superadmin seed + backfill buttons were removed
+before launch (commit a87e697).
 
 ### 8. Stand up a separate staging Firebase project — DECIDED, do at launch time
 **Decision (2026-07-24):** at launch, split into two Firebase projects — a `staging`
