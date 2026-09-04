@@ -53,6 +53,28 @@ export function isAdmin() { return !!(currentProfile && (currentProfile.isAdmin 
 export function isStoreAdmin() { return !!(currentProfile && (currentProfile.isStoreAdmin || currentProfile.isSuperadmin)); }
 export function isAnyAdminTier() { return isAdmin() || isStoreAdmin(); }
 
+// The slice of a profile any member may see. Anonymous users expose no real
+// name/photo, so anonymity is genuine (admins still see the truth via the
+// private users doc). Role flags ride along only for client-side targeting
+// (e.g. finding store admins to notify) — advisory, never a security boundary.
+export function publicProfileFrom(uid, p) {
+  p = p || {};
+  const anon = !!p.anonymous;
+  return {
+    uid,
+    displayName: anon ? '' : (p.displayName || ''),
+    photoURL: anon ? '' : (p.photoURL || ''),
+    anonymous: anon,
+    isAdmin: !!p.isAdmin,
+    isStoreAdmin: !!p.isStoreAdmin,
+    isSuperadmin: !!p.isSuperadmin,
+  };
+}
+export async function writePublicProfile(uid, p) {
+  try { await setDoc(doc(db, 'publicProfiles', uid), publicProfileFrom(uid, p)); }
+  catch (e) { /* non-fatal — display falls back to sign-up name */ }
+}
+
 export function watchAuth(onSignedIn, onSignedOut) {
   onAuthStateChanged(auth, async (user) => {
     if (!user) { notifyProfile(null); onSignedOut && onSignedOut(); return; }
@@ -64,12 +86,14 @@ export function watchAuth(onSignedIn, onSignedOut) {
     };
     if (snap.exists() && snap.data().displayName) {
       notifyProfile({ uid: user.uid, ...DEFAULTS, ...snap.data() });
+      writePublicProfile(user.uid, currentProfile); // keep the public mirror in sync / migrate
       onSignedIn && onSignedIn(currentProfile, false);
     } else if (snap.exists()) {
       // Doc exists but is incomplete (e.g. created by manually adding an admin
       // flag in the console rather than via the join flow). Merge in safe
       // defaults so nothing downstream ever writes `undefined` to Firestore.
       notifyProfile({ uid: user.uid, ...DEFAULTS, ...snap.data() });
+      writePublicProfile(user.uid, currentProfile);
       onSignedIn && onSignedIn(currentProfile, false);
     } else {
       notifyProfile(null);
@@ -112,6 +136,7 @@ export async function completeProfile({ displayName, phone, divisions, anonymous
     createdAt: serverTimestamp(),
   };
   await setDoc(doc(db, "users", user.uid), profile);
+  await writePublicProfile(user.uid, profile);
   notifyProfile({ uid: user.uid, ...profile });
   return profile;
 }

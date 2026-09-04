@@ -161,7 +161,7 @@ function renderApp(profile) {
   }, err => { document.getElementById('feed').innerHTML = `<p style="color:var(--ink-soft)">Could not load events: ${esc(err.message)}</p>`; });
 
   // Participant data for the attendee bubbles: everyone who signed up in any way.
-  onSnapshot(collection(db, 'users'), snap => { users = {}; snap.docs.forEach(d => { users[d.id] = { uid: d.id, ...d.data() }; }); renderFeed(); }, () => {});
+  onSnapshot(collection(db, 'publicProfiles'), snap => { users = {}; snap.docs.forEach(d => { users[d.id] = { uid: d.id, ...d.data() }; }); renderFeed(); }, () => {});
   onSnapshot(collection(db, 'signups'), snap => { sAll = snap.docs.map(d => d.data()); rebuildParticipants(); }, () => {});
   onSnapshot(collection(db, 'eventSlotSignups'), snap => { slotAll = snap.docs.map(d => d.data()); rebuildParticipants(); }, () => {});
   onSnapshot(collection(db, 'eventItemSignups'), snap => { itemAll = snap.docs.map(d => d.data()); rebuildParticipants(); }, () => {});
@@ -192,15 +192,16 @@ function renderFeed() {
   const list = ecoFilter === 'all' ? events : events.filter(ev => (ev.divisions || []).includes(ecoFilter));
   if (!list.length) { feed.innerHTML = `<p style="color:var(--ink-soft)">No events yet — check back soon.</p>`; return; }
   feed.innerHTML = `<div class="grid">${list.map(ev => {
-    const people = [...(partByEvent[ev.id] || [])].map(uid => users[uid]).filter(Boolean);
+    const uids = [...(partByEvent[ev.id] || [])];
+    const people = uids.map(uid => users[uid]).filter(Boolean);
     return `
     <a class="card" href="event.html?id=${ev.id}" style="display:block;padding:14px;border-left:5px solid var(--navy)">
       <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--ink-soft)">${(ev.divisions||[]).map(divLabel).join(', ')}</div>
       <h3 style="margin:4px 0 6px;font-size:16.5px">${esc(ev.title||'Untitled event')}</h3>
       <div style="font-size:12.5px;color:var(--ink-soft)">📅 ${esc(ev.date||'')} · 📍 ${esc(ev.location||'')}</div>
-      ${people.length ? `<div style="display:flex;align-items:center;gap:8px;margin-top:10px">
+      ${uids.length ? `<div style="display:flex;align-items:center;gap:8px;margin-top:10px">
         ${bubbleRowHtml(people, 5)}
-        <span style="font-size:11.5px;color:var(--ink-soft)">${people.length} signed up</span>
+        <span style="font-size:11.5px;color:var(--ink-soft)">${uids.length} signed up</span>
       </div>` : ''}
     </a>`;
   }).join('')}</div>`;

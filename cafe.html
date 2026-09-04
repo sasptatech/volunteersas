@@ -383,7 +383,9 @@ function wireBodyHandlers(storeAdmin) {
 async function notifyStoreAdmins(cancelledSignup) {
   try {
     const { getDocs } = await import("./js/firebase-init.js");
-    const snap = await getDocs(collection(db, 'users'));
+    // Public mirror carries the role flags and is readable by any member, so a
+    // regular volunteer self-cancelling can still find who to notify.
+    const snap = await getDocs(collection(db, 'publicProfiles'));
     const admins = snap.docs.map(d => ({ uid: d.id, ...d.data() })).filter(u => u.isStoreAdmin || u.isSuperadmin);
     const st = SHIFT_TYPES.find(t => t.id === cancelledSignup.shift);
     const label = st ? st.label : (cancelledSignup.message || cancelledSignup.shift);

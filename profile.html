@@ -14,7 +14,7 @@
 <div id="ovl"></div>
 
 <script type="module">
-import { watchAuth, getProfile, ECOSYSTEMS } from "./js/auth.js";
+import { watchAuth, getProfile, ECOSYSTEMS, writePublicProfile } from "./js/auth.js";
 import { db, doc, updateDoc, deleteDoc, collection, query, where, getDocs, storageRef, uploadBytes, getDownloadURL } from "./js/firebase-init.js";
 import { toast, showOverlay, closeOverlay, renderHeader, esc, bubbleHtml } from "./js/common.js";
 
@@ -73,6 +73,7 @@ function render(p) {
       await uploadBytes(r, file);
       const url = await getDownloadURL(r);
       await updateDoc(doc(db, 'users', p.uid), { photoURL: url });
+      await writePublicProfile(p.uid, { ...p, photoURL: url });
       toast('Photo updated — refresh to see it everywhere.');
     } catch (e) { toast('Upload failed: ' + e.message); }
   };
@@ -84,12 +85,14 @@ function render(p) {
     const email = document.getElementById('pEmail').value.trim();
     if (!name) { toast('Name cannot be empty.'); return; }
     try {
+      const anonymous = document.getElementById('pAnon').checked;
       await updateDoc(doc(db, 'users', p.uid), {
         displayName: name, phone, divisions,
         status: document.getElementById('pStatus').value.trim(),
-        anonymous: document.getElementById('pAnon').checked,
+        anonymous,
         emailOptOut: document.getElementById('pEmailOptOut').checked,
       });
+      await writePublicProfile(p.uid, { ...p, displayName: name, anonymous });
       if (email && email !== p.email) {
         try {
           const { auth } = await import("./js/firebase-init.js");
@@ -123,6 +126,7 @@ function render(p) {
           for (const d of snap.docs) await deleteDoc(doc(db, coll, d.id));
         }
         await deleteDoc(doc(db, 'users', p.uid));
+        await deleteDoc(doc(db, 'publicProfiles', p.uid)).catch(() => {});
         try {
           const { auth } = await import("./js/firebase-init.js");
           const { deleteUser } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js");

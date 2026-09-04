@@ -75,14 +75,14 @@ async function collectEmailRecipients() {
   ].filter(Boolean))];
   const emails = [];
   let optedOut = 0, noEmail = 0;
+  // Emails live in the PRIVATE users doc (admin-readable). The email button is
+  // admin-only, so fetch those directly rather than the public mirror.
   for (const uid of uids) {
-    let u = usersCache[uid];
-    if (!u) {
-      try {
-        const s = await getDoc(doc(db, 'users', uid));
-        if (s.exists()) { u = { uid, ...s.data() }; usersCache[uid] = u; }
-      } catch (e) { /* skip unreadable */ }
-    }
+    let u = null;
+    try {
+      const s = await getDoc(doc(db, 'users', uid));
+      if (s.exists()) u = s.data();
+    } catch (e) { /* not readable — treat as no-email */ }
     if (!u) { noEmail++; continue; }
     if (u.emailOptOut) { optedOut++; continue; }
     if (!u.email) { noEmail++; continue; }
@@ -113,11 +113,12 @@ function loadEvent() {
 
 async function hydrateUsers() {
   // Hydrate everyone referenced by any sign-up type — attendees AND volunteers —
-  // so both bubble rows can show photos/anonymity.
+  // for the bubble rows. Reads the PUBLIC mirror (name/photo/anonymous only), so
+  // any member can see the bubbles without exposing contact details.
   const uids = [...new Set([...signups, ...slotSignups, ...itemSignups].map(s => s.uid).filter(Boolean))]
     .filter(uid => !usersCache[uid]);
   for (const uid of uids) {
-    const s = await getDoc(doc(db, 'users', uid));
+    const s = await getDoc(doc(db, 'publicProfiles', uid));
     if (s.exists()) usersCache[uid] = { uid, ...s.data() };
   }
   render();

@@ -25,9 +25,12 @@ service cloud.firestore {
       return isSignedIn() && (request.auth.uid in ev.adminUids || isSuperadmin());
     }
 
-    // ---- users ----
+    // ---- users (PRIVATE profile: email, phone, etc.) ----
+    // Readable only by the person themselves and admins. Everyone else reads the
+    // public mirror in /publicProfiles. (Rule-internal myProfile() get()s still
+    // work — get() isn't subject to these read rules.)
     match /users/{userId} {
-      allow read: if isSignedIn();
+      allow read: if request.auth.uid == userId || isAnyAdminTier();
       allow create: if isSignedIn() && request.auth.uid == userId;
       // Users can edit their own profile, but never grant themselves admin tiers.
       allow update: if isSignedIn() && request.auth.uid == userId
@@ -39,6 +42,16 @@ service cloud.firestore {
       // (self-service account deletion).
       allow update: if isSuperadmin();
       allow delete: if isSuperadmin() || request.auth.uid == userId;
+    }
+
+    // ---- public profiles (display-only mirror; any member may read) ----
+    // Holds display name/photo/anonymous + advisory role flags. Real name/photo
+    // are blanked for anonymous users before they're written here, so members
+    // can't unmask anonymity. Each user writes their own; superadmin can write
+    // any (role changes, cleanup on removal).
+    match /publicProfiles/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (request.auth.uid == userId || isSuperadmin());
     }
 
     // ---- events ----

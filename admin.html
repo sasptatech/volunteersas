@@ -14,7 +14,7 @@
 <div id="ovl"></div>
 
 <script type="module">
-import { watchAuth, getProfile, isSuperadmin, isAdmin, isStoreAdmin, isAnyAdminTier, ECOSYSTEMS } from "./js/auth.js";
+import { watchAuth, getProfile, isSuperadmin, isAdmin, isStoreAdmin, isAnyAdminTier, ECOSYSTEMS, writePublicProfile } from "./js/auth.js";
 import {
   db, collection, doc, addDoc, updateDoc, deleteDoc, getDocs, getDoc, setDoc, onSnapshot,
   serverTimestamp, query, where, orderBy, limit, storageRef, uploadBytes, getDownloadURL, deleteObject, arrayUnion
@@ -116,6 +116,7 @@ function renderEventsTab() {
     <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
       <button class="btn btn-primary" id="newEventBtn">+ Create event</button>
       ${isAnyAdminTier() ? `<button class="btn btn-ghost" id="seedEventsBtn">🌱 Seed sample events (dev)</button>` : ''}
+      ${isSuperadmin() ? `<button class="btn btn-ghost" id="backfillPubBtn">🔁 Backfill public profiles</button>` : ''}
     </div>
     <div class="grid">${mine.map(e => `
       <div class="card" style="padding:14px">
@@ -486,6 +487,20 @@ function wireTabHandlers() {
     finally { seedBtn.disabled = false; seedBtn.textContent = '🌱 Seed sample events (dev)'; }
   };
 
+  // One-shot: create/refresh a public profile for every existing user. Superadmin
+  // only (writing others' public profiles). Run once after the privacy split.
+  const backfillPubBtn = document.getElementById('backfillPubBtn');
+  if (backfillPubBtn) backfillPubBtn.onclick = async () => {
+    if (!isSuperadmin()) return;
+    const all = Object.values(users);
+    if (!confirm(`Create/refresh public profiles for ${all.length} members?`)) return;
+    backfillPubBtn.disabled = true; backfillPubBtn.textContent = 'Backfilling…';
+    let ok = 0;
+    for (const u of all) { try { await writePublicProfile(u.uid, u); ok++; } catch (e) { /* skip */ } }
+    backfillPubBtn.disabled = false; backfillPubBtn.textContent = '🔁 Backfill public profiles';
+    toast(`Public profiles written for ${ok}/${all.length} members.`);
+  };
+
   const newEventBtn = document.getElementById('newEventBtn');
   if (newEventBtn) newEventBtn.onclick = () => {
     showOverlay(`<div class="modal wide" style="position:relative">
@@ -583,6 +598,8 @@ function wireTabHandlers() {
     if (!confirm(`${value ? 'Grant' : 'Remove'} ${field} for this member?`)) return;
     try {
       await updateDoc(doc(db, 'users', uid), { [field]: value });
+      // Mirror the role flag to the public profile (used for admin discovery).
+      await setDoc(doc(db, 'publicProfiles', uid), { [field]: value }, { merge: true }).catch(() => {});
       await logAudit(`${value ? 'Granted' : 'Removed'} ${field}`, uid);
       toast('Updated.');
     } catch (e) { toast('Could not update: ' + e.message); }
@@ -604,6 +621,7 @@ function wireTabHandlers() {
         removedBy: getProfile().displayName, removedAt: serverTimestamp(),
       });
       await deleteDoc(doc(db, 'users', uid));
+      await deleteDoc(doc(db, 'publicProfiles', uid)).catch(() => {});
       await logAudit('Removed member', uid);
       toast('Member archived and removed.');
     } catch (e) { toast('Could not remove: ' + e.message); }
