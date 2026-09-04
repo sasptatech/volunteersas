@@ -67,7 +67,7 @@ checks: profile photos = owner only (image <8MB); event photos/attachments = tha
 event's admins; cafe menu = Store Admin (PDF/image <25MB). Read already required
 sign-in. (storage.rules — published in the console.)
 
-### 5. Close the privacy/abuse gaps in Firestore rules — ✅ DONE (2026-09-…)
+### 5. Close the privacy/abuse gaps in Firestore rules — ✅ DONE + VERIFIED LIVE (rules published, backfill run)
 - ✅ **Profile privacy (Phase 2) — BUILT (commit 53fbbe0).** Split into
   `publicProfiles/{uid}` (name/photo/anonymous + advisory role flags, member-
   readable) vs `users/{uid}` (email/phone, self+admin only). Anonymous users are
