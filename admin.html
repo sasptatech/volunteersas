@@ -508,7 +508,10 @@ function wireTabHandlers() {
       <h2>Create event</h2>
       <div class="form-row"><label>Title</label><input id="neTitle"></div>
       <div class="form-row"><label>Date</label><input type="date" id="neDate"></div>
-      <div class="form-row"><label>Time</label><input list="ecHalfHours" id="neTime" placeholder="e.g. 9:00 AM"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="form-row" style="margin:0"><label>Start time</label><input list="ecHalfHours" id="neTime" placeholder="e.g. 9:00 AM"></div>
+        <div class="form-row" style="margin:0"><label>End time (optional)</label><input list="ecHalfHours" id="neEndTime" placeholder="e.g. 11:00 AM"></div>
+      </div>
       <div class="form-row"><label>Location</label><input id="neLoc"></div>
       <div id="ecConfig">${componentConfigHtml({})}</div>
       <div class="form-row"><label>Description</label>${rteHtml('neDescRTE')}</div>
@@ -539,6 +542,7 @@ function wireTabHandlers() {
       try {
         const ref = await addDoc(collection(db, 'events'), {
           title, date, time: normalizeTime(document.getElementById('neTime').value),
+          endTime: normalizeTime(document.getElementById('neEndTime').value),
           location: document.getElementById('neLoc').value.trim(),
           description, ...cfg,
           divisions, adminUids: [getProfile().uid], attachments: [], photos: [], createdAt: serverTimestamp(),

@@ -16,7 +16,7 @@
 <script type="module">
 import { watchAuth, getProfile } from "./js/auth.js";
 import { db, collection, query, where, onSnapshot, doc, getDoc, deleteDoc } from "./js/firebase-init.js";
-import { SHIFT_TYPES, fmtDayLabel, pad, dstr, mondayOf, weekDates, shiftWeek } from "./js/cafe-dates.js";
+import { SHIFT_TYPES, fmtDayLabel, pad, dstr, mondayOf, weekDates, shiftWeek, timeToMinutes } from "./js/cafe-dates.js";
 import { toast, renderHeader, esc } from "./js/common.js";
 import { renderAddToCalendar } from "./js/calendar.js";
 
@@ -74,8 +74,11 @@ function buildItems() {
   return [
     ...myEventSignups.filter(s => eventCache[s.eventId]).map(s => {
       const ev = eventCache[s.eventId];
+      const dur = (ev.time && ev.endTime) ? (timeToMinutes(ev.endTime) - timeToMinutes(ev.time)) / 60 : 0;
       return {
-        type: 'event', date: ev.date, id: s.id, time: ev.time,
+        type: 'event', date: ev.date, id: s.id,
+        time: ev.time ? (ev.endTime ? `${ev.time} – ${ev.endTime}` : ev.time) : '',
+        startTime: ev.time, durationHrs: dur > 0 ? dur : 2,
         label: ev.title, href: `event.html?id=${s.eventId}`,
         location: ev.location, description: ev.description,
       };
@@ -101,10 +104,13 @@ function buildItems() {
     }),
     ...myItemSignups.filter(s => eventCache[s.eventId]).map(s => {
       const ev = eventCache[s.eventId];
+      const dur = (ev.time && ev.endTime) ? (timeToMinutes(ev.endTime) - timeToMinutes(ev.time)) / 60 : 0;
       return {
-        type: 'item', date: ev.date, id: s.id, time: ev.time,
+        type: 'item', date: ev.date, id: s.id,
+        time: ev.time ? (ev.endTime ? `${ev.time} – ${ev.endTime}` : ev.time) : '',
         label: `${ev.title} — bringing "${s.item}"`,
-        href: `event.html?id=${s.eventId}`, startTime: ev.time, location: ev.location, description: ev.description,
+        href: `event.html?id=${s.eventId}`, startTime: ev.time, durationHrs: dur > 0 ? dur : 2,
+        location: ev.location, description: ev.description,
       };
     }),
   ].sort((a, b) => (a.date || '').localeCompare(b.date || ''));

@@ -25,7 +25,7 @@ import { renderAddToCalendar } from "./js/calendar.js";
 import { rteHtml, rteValue } from "./js/rte.js";
 import { queueEmails } from "./js/email.js";
 import { eventComponents, slotLocation, componentConfigHtml, wireComponentConfig, readComponentConfig, deleteEventFully } from "./js/events.js";
-import { normalizeTime } from "./js/cafe-dates.js";
+import { normalizeTime, timeToMinutes } from "./js/cafe-dates.js";
 
 const root = document.getElementById('root');
 const params = new URLSearchParams(location.search);
@@ -138,7 +138,7 @@ function render() {
       ${editing ? renderEditForm() : `
         <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--ink-soft)">${(ev.divisions || []).map(id => (ECOSYSTEMS.find(e => e.id === id) || {}).short || id).join(', ')}</div>
         <h1 class="serif" style="font-size:24px;margin:6px 0">${esc(ev.title || 'Untitled event')}</h1>
-        <div style="font-size:13.5px;color:var(--ink-soft);margin-bottom:14px">📅 ${esc(ev.date || '')} ${ev.time ? '· ' + esc(ev.time) : ''} · 📍 ${renderLocation()}</div>
+        <div style="font-size:13.5px;color:var(--ink-soft);margin-bottom:14px">📅 ${esc(ev.date || '')} ${ev.time ? '· ' + esc(ev.time) + (ev.endTime ? ' – ' + esc(ev.endTime) : '') : ''} · 📍 ${renderLocation()}</div>
         ${heroHtml()}
         <div style="font-size:14px;line-height:1.6">${sanitizeHtml(ev.description || '')}</div>
         <div id="addCalEvent" style="margin-top:10px"></div>
@@ -172,8 +172,14 @@ function render() {
 
   renderChatPanel('eventChat', 'event', eventId, { canModerate: isAdminHere });
   if (document.getElementById('addCalEvent')) {
+    // Use the real end time for the calendar entry's length when it's set.
+    let durationHrs = 2;
+    if (ev.time && ev.endTime) {
+      const d = (timeToMinutes(ev.endTime) - timeToMinutes(ev.time)) / 60;
+      if (d > 0) durationHrs = d;
+    }
     renderAddToCalendar('addCalEvent', {
-      title: ev.title, date: ev.date, startTime: ev.time, durationHrs: 2,
+      title: ev.title, date: ev.date, startTime: ev.time, durationHrs,
       location: ev.location, description: ev.description,
     });
   }
@@ -327,7 +333,10 @@ function renderEditForm() {
   return `
     <div class="form-row"><label>Title</label><input id="edTitle" value="${esc(ev.title || '')}"></div>
     <div class="form-row"><label>Date</label><input id="edDate" type="date" value="${esc(ev.date || '')}"></div>
-    <div class="form-row"><label>Time</label><input list="ecHalfHours" id="edTime" value="${esc(ev.time || '')}" placeholder="e.g. 9:00 AM"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="form-row" style="margin:0"><label>Start time</label><input list="ecHalfHours" id="edTime" value="${esc(ev.time || '')}" placeholder="e.g. 9:00 AM"></div>
+      <div class="form-row" style="margin:0"><label>End time (optional)</label><input list="ecHalfHours" id="edEndTime" value="${esc(ev.endTime || '')}" placeholder="e.g. 11:00 AM"></div>
+    </div>
     <div class="form-row"><label>Location</label><input id="edLoc" value="${esc(ev.location || '')}"></div>
     <div id="ecConfig">${componentConfigHtml(ev)}</div>
     <div class="form-row"><label>Description</label>${rteHtml('edDescRTE', ev.description || '')}</div>
@@ -432,6 +441,7 @@ function wireHandlers(isAdminHere) {
         title: document.getElementById('edTitle').value.trim(),
         date: document.getElementById('edDate').value,
         time: normalizeTime(document.getElementById('edTime').value),
+        endTime: normalizeTime(document.getElementById('edEndTime').value),
         location: document.getElementById('edLoc').value.trim(),
         description: rteValue('edDescRTE'),
         divisions, ...cfg,
