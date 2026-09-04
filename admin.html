@@ -14,7 +14,7 @@
 <div id="ovl"></div>
 
 <script type="module">
-import { watchAuth, getProfile, isSuperadmin, isAdmin, isStoreAdmin, isAnyAdminTier, ECOSYSTEMS, writePublicProfile } from "./js/auth.js";
+import { watchAuth, getProfile, isSuperadmin, isAdmin, isStoreAdmin, isAnyAdminTier, ECOSYSTEMS } from "./js/auth.js";
 import {
   db, collection, doc, addDoc, updateDoc, deleteDoc, getDocs, getDoc, setDoc, onSnapshot,
   serverTimestamp, query, where, orderBy, limit, storageRef, uploadBytes, getDownloadURL, deleteObject, arrayUnion
@@ -115,8 +115,6 @@ function renderEventsTab() {
   return `
     <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
       <button class="btn btn-primary" id="newEventBtn">+ Create event</button>
-      ${isAnyAdminTier() ? `<button class="btn btn-ghost" id="seedEventsBtn">🌱 Seed sample events (dev)</button>` : ''}
-      ${isSuperadmin() ? `<button class="btn btn-ghost" id="backfillPubBtn">🔁 Backfill public profiles</button>` : ''}
     </div>
     <div class="grid">${mine.map(e => `
       <div class="card" style="padding:14px">
@@ -425,82 +423,6 @@ function renderAuditTab() {
 // the event-page edit form via js/events.js — see componentConfigHtml / readComponentConfig.
 
 function wireTabHandlers() {
-  // TEMPORARY dev helper — remove before launch. Superadmin-only.
-  const seedBtn = document.getElementById('seedEventsBtn');
-  if (seedBtn) seedBtn.onclick = async () => {
-    if (!isAnyAdminTier()) return;
-    if (!confirm('Create 6 sample events (new component model) for testing? Delete them when you\'re done.')) return;
-    seedBtn.disabled = true; seedBtn.textContent = 'Seeding…';
-    const base = { adminUids: [getProfile().uid], attachments: [], photos: [], createdAt: serverTimestamp() };
-    const D = ['le', 'ue', 'ms', 'hs'];
-    const samples = [
-      { title: "Back-to-School Coffee Morning", date: "2026-08-12", time: "8:30 AM", location: "PTA Cafe", mappedinLocationId: null,
-        description: "<p>Kick off the year with coffee, pastries, and a chance to meet other parents. All welcome!</p>", divisions: D,
-        rsvpEnabled: true, volunteerSlotsEnabled: false, itemSignupEnabled: false,
-        rsvpCapacity: 60, rsvpMaxGuests: 2, rsvpRequireGuestNames: false, multiLocation: false, slotGroups: [], itemCategories: [] },
-      { title: "MS Library Book Fair — Volunteer Crew", date: "2026-08-20", time: "8:00 AM", location: "MS Library", mappedinLocationId: null,
-        description: "<p>Help run the annual book fair. Pick a shift below.</p>", divisions: ["ms"],
-        rsvpEnabled: false, volunteerSlotsEnabled: true, itemSignupEnabled: false,
-        rsvpCapacity: 100, rsvpMaxGuests: 1, rsvpRequireGuestNames: false, multiLocation: false,
-        slotGroups: [
-          { id: "sg_seed2a", label: "Setup", startTime: "8:00 AM", endTime: "9:00 AM", capacity: 3 },
-          { id: "sg_seed2b", label: "Sales desk", startTime: "9:00 AM", endTime: "12:00 PM", capacity: 4 },
-          { id: "sg_seed2c", label: "Pack-down", startTime: "12:00 PM", endTime: "1:00 PM", capacity: 3 },
-        ], itemCategories: [] },
-      { title: "ES Bake Sale — Donations Needed", date: "2026-08-28", time: "2:00 PM", location: "ES Lobby", mappedinLocationId: null,
-        description: "<p>Contributions welcome — home-baked or store-bought both fine. Please label allergens.</p>", divisions: ["le", "ue"],
-        rsvpEnabled: false, volunteerSlotsEnabled: false, itemSignupEnabled: true,
-        rsvpCapacity: 100, rsvpMaxGuests: 1, rsvpRequireGuestNames: false, multiLocation: false, slotGroups: [],
-        itemCategories: [
-          { id: "ic_seed3a", label: "Brownies", quota: 20, order: 0 },
-          { id: "ic_seed3b", label: "Cookies", quota: 20, order: 1 },
-          { id: "ic_seed3c", label: "Gluten-free treats", quota: 10, order: 2 },
-        ] },
-      { title: "HS International Potluck", date: "2026-09-05", time: "6:00 PM", location: "HS Commons", mappedinLocationId: null,
-        description: "<p>Bring a dish that represents your family's heritage. RSVP so we can plan seating.</p>", divisions: ["hs", "ms"],
-        rsvpEnabled: true, volunteerSlotsEnabled: false, itemSignupEnabled: true,
-        rsvpCapacity: 150, rsvpMaxGuests: 4, rsvpRequireGuestNames: true, multiLocation: false, slotGroups: [],
-        itemCategories: [
-          { id: "ic_seed4a", label: "Main dishes", quota: 20, order: 0 },
-          { id: "ic_seed4b", label: "Sides & salads", quota: 20, order: 1 },
-          { id: "ic_seed4c", label: "Desserts", quota: 15, order: 2 },
-          { id: "ic_seed4d", label: "Drinks", quota: 10, order: 3 },
-        ] },
-      { title: "Fall Festival — Setup & Celebration", date: "2026-09-19", time: "9:00 AM", location: "MPH", mappedinLocationId: null,
-        description: "<p>Our biggest event of the term! Come as a guest, or sign up to help set up and run booths.</p>", divisions: D,
-        rsvpEnabled: true, volunteerSlotsEnabled: true, itemSignupEnabled: false,
-        rsvpCapacity: 300, rsvpMaxGuests: 5, rsvpRequireGuestNames: false, multiLocation: true,
-        slotGroups: [
-          { id: "sg_seed5a", label: "Decorating crew", startTime: "8:00 AM", endTime: "9:00 AM", capacity: 4, location: "MPH" },
-          { id: "sg_seed5b", label: "Games booths", startTime: "9:00 AM", endTime: "12:00 PM", capacity: 6, location: "Field" },
-          { id: "sg_seed5c", label: "Pack-down", startTime: "2:00 PM", endTime: "3:00 PM", capacity: 5, location: "MPH" },
-        ], itemCategories: [] },
-      { title: "Year-End Gala", date: "2026-11-14", time: "7:00 PM", location: "Ballroom (TBC)", mappedinLocationId: null,
-        description: "<p>Save the date! Tickets and details coming soon.</p>", divisions: D,
-        rsvpEnabled: false, volunteerSlotsEnabled: false, itemSignupEnabled: false,
-        rsvpCapacity: 100, rsvpMaxGuests: 1, rsvpRequireGuestNames: false, multiLocation: false, slotGroups: [], itemCategories: [] },
-    ];
-    try {
-      for (const s of samples) await addDoc(collection(db, 'events'), { ...base, ...s });
-      toast(`Created ${samples.length} sample events.`);
-    } catch (e) { toast('Could not seed: ' + e.message); }
-    finally { seedBtn.disabled = false; seedBtn.textContent = '🌱 Seed sample events (dev)'; }
-  };
-
-  // One-shot: create/refresh a public profile for every existing user. Superadmin
-  // only (writing others' public profiles). Run once after the privacy split.
-  const backfillPubBtn = document.getElementById('backfillPubBtn');
-  if (backfillPubBtn) backfillPubBtn.onclick = async () => {
-    if (!isSuperadmin()) return;
-    const all = Object.values(users);
-    if (!confirm(`Create/refresh public profiles for ${all.length} members?`)) return;
-    backfillPubBtn.disabled = true; backfillPubBtn.textContent = 'Backfilling…';
-    let ok = 0;
-    for (const u of all) { try { await writePublicProfile(u.uid, u); ok++; } catch (e) { /* skip */ } }
-    backfillPubBtn.disabled = false; backfillPubBtn.textContent = '🔁 Backfill public profiles';
-    toast(`Public profiles written for ${ok}/${all.length} members.`);
-  };
-
   const newEventBtn = document.getElementById('newEventBtn');
   if (newEventBtn) newEventBtn.onclick = () => {
     showOverlay(`<div class="modal wide" style="position:relative">
