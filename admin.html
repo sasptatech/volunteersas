@@ -22,7 +22,7 @@ import {
 import { toast, showOverlay, closeOverlay, esc, renderHeader } from "./js/common.js";
 import { rteHtml, rteValue } from "./js/rte.js";
 import {
-  SHIFT_TYPES, isSchoolDay, mondayOf, weekDates, dstr, fmtDayLabel, timeToMinutes, shiftCapacity
+  SHIFT_TYPES, isSchoolDay, mondayOf, weekDates, dstr, fmtDayLabel, timeToMinutes, shiftCapacity, normalizeTime
 } from "./js/cafe-dates.js";
 import { queueEmails } from "./js/email.js";
 import { componentConfigHtml, wireComponentConfig, readComponentConfig, deleteEventFully } from "./js/events.js";
@@ -493,7 +493,7 @@ function wireTabHandlers() {
       <h2>Create event</h2>
       <div class="form-row"><label>Title</label><input id="neTitle"></div>
       <div class="form-row"><label>Date</label><input type="date" id="neDate"></div>
-      <div class="form-row"><label>Time</label><input id="neTime" placeholder="e.g. 9:00 AM"></div>
+      <div class="form-row"><label>Time</label><input list="ecHalfHours" id="neTime" placeholder="e.g. 9:00 AM"></div>
       <div class="form-row"><label>Location</label><input id="neLoc"></div>
       <div id="ecConfig">${componentConfigHtml({})}</div>
       <div class="form-row"><label>Description</label>${rteHtml('neDescRTE')}</div>
@@ -523,7 +523,7 @@ function wireTabHandlers() {
       saveBtn.disabled = true; saveBtn.textContent = 'Creating…';
       try {
         const ref = await addDoc(collection(db, 'events'), {
-          title, date, time: document.getElementById('neTime').value.trim(),
+          title, date, time: normalizeTime(document.getElementById('neTime').value),
           location: document.getElementById('neLoc').value.trim(),
           description, ...cfg,
           divisions, adminUids: [getProfile().uid], attachments: [], photos: [], createdAt: serverTimestamp(),

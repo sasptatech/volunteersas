@@ -25,6 +25,7 @@ import { renderAddToCalendar } from "./js/calendar.js";
 import { rteHtml, rteValue } from "./js/rte.js";
 import { queueEmails } from "./js/email.js";
 import { eventComponents, slotLocation, componentConfigHtml, wireComponentConfig, readComponentConfig, deleteEventFully } from "./js/events.js";
+import { normalizeTime } from "./js/cafe-dates.js";
 
 const root = document.getElementById('root');
 const params = new URLSearchParams(location.search);
@@ -325,7 +326,7 @@ function renderEditForm() {
   return `
     <div class="form-row"><label>Title</label><input id="edTitle" value="${esc(ev.title || '')}"></div>
     <div class="form-row"><label>Date</label><input id="edDate" type="date" value="${esc(ev.date || '')}"></div>
-    <div class="form-row"><label>Time</label><input id="edTime" value="${esc(ev.time || '')}" placeholder="e.g. 9:00 AM"></div>
+    <div class="form-row"><label>Time</label><input list="ecHalfHours" id="edTime" value="${esc(ev.time || '')}" placeholder="e.g. 9:00 AM"></div>
     <div class="form-row"><label>Location</label><input id="edLoc" value="${esc(ev.location || '')}"></div>
     <div id="ecConfig">${componentConfigHtml(ev)}</div>
     <div class="form-row"><label>Description</label>${rteHtml('edDescRTE', ev.description || '')}</div>
@@ -429,7 +430,7 @@ function wireHandlers(isAdminHere) {
       await updateDoc(doc(db, 'events', eventId), {
         title: document.getElementById('edTitle').value.trim(),
         date: document.getElementById('edDate').value,
-        time: document.getElementById('edTime').value.trim(),
+        time: normalizeTime(document.getElementById('edTime').value),
         location: document.getElementById('edLoc').value.trim(),
         description: rteValue('edDescRTE'),
         divisions, ...cfg,
