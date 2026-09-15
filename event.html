@@ -24,7 +24,7 @@ import { renderChatPanel } from "./js/chat.js";
 import { renderAddToCalendar } from "./js/calendar.js";
 import { rteHtml, rteValue } from "./js/rte.js";
 import { queueEmails } from "./js/email.js";
-import { eventComponents, slotLocation, componentConfigHtml, wireComponentConfig, readComponentConfig, deleteEventFully } from "./js/events.js";
+import { eventComponents, slotLocation, componentConfigHtml, wireComponentConfig, readComponentConfig, deleteEventFully, to24h } from "./js/events.js";
 import { normalizeTime, timeToMinutes } from "./js/cafe-dates.js";
 
 const root = document.getElementById('root');
@@ -334,8 +334,8 @@ function renderEditForm() {
     <div class="form-row"><label>Title</label><input id="edTitle" value="${esc(ev.title || '')}"></div>
     <div class="form-row"><label>Date</label><input id="edDate" type="date" value="${esc(ev.date || '')}"></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-      <div class="form-row" style="margin:0"><label>Start time</label><input list="ecHalfHours" id="edTime" value="${esc(ev.time || '')}" placeholder="e.g. 9:00 AM"></div>
-      <div class="form-row" style="margin:0"><label>End time (optional)</label><input list="ecHalfHours" id="edEndTime" value="${esc(ev.endTime || '')}" placeholder="e.g. 11:00 AM"></div>
+      <div class="form-row" style="margin:0"><label>Start time</label><input type="time" id="edTime" value="${to24h(ev.time)}"></div>
+      <div class="form-row" style="margin:0"><label>End time (optional)</label><input type="time" id="edEndTime" value="${to24h(ev.endTime)}"></div>
     </div>
     <div class="form-row"><label>Location</label><input id="edLoc" value="${esc(ev.location || '')}"></div>
     <div id="ecConfig">${componentConfigHtml(ev)}</div>

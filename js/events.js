@@ -7,11 +7,11 @@
 // The create form (admin.html) and the edit form (event.html) share ONE config
 // UI from here, so they never drift apart.
 import { esc } from "./common.js";
-import { halfHourOptions, normalizeTime, timeToMinutes } from "./cafe-dates.js";
+import { normalizeTime, timeToMinutes } from "./cafe-dates.js";
 
 // Convert a stored 12-hour time ("9:00 AM") to the 24-hour "HH:MM" that a native
 // <input type="time"> expects. Empty stays empty.
-function to24h(str) {
+export function to24h(str) {
   if (!str || !str.trim()) return '';
   const mins = timeToMinutes(str);
   return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
@@ -84,7 +84,6 @@ export function componentConfigHtml(ev) {
     <div data-ec-block="slots" style="display:${c.slots ? 'block' : 'none'};border-left:3px solid var(--line);padding-left:12px;margin-bottom:12px">
       <label style="display:flex;gap:8px;align-items:center;font-size:12.5px;margin-bottom:8px"><input type="checkbox" style="width:auto" id="ecMultiLoc" data-ec-multiloc ${chk(ev.multiLocation)}> This event runs at multiple locations (set a location per slot)</label>
       <label style="font-size:12.5px;font-weight:600;color:var(--ink-soft)">Volunteer slot groups</label>
-      <datalist id="ecHalfHours">${halfHourOptions(6, 21).map(t => `<option value="${t}">`).join('')}</datalist>
       <div id="ecSlotRows" style="margin-top:6px">${groups.map(g => slotRowHtml(g, ev.multiLocation)).join('')}</div>
       <button type="button" class="btn btn-ghost" data-ec-addslot style="margin-top:6px">+ Add slot group</button>
     </div>
@@ -100,17 +99,24 @@ function slotRowHtml(g, multiLoc) {
   g = g || {};
   // Each slot is its own bordered card (clear separation), laid out over three
   // rows so it fits the width: label + remove; start/end/spots; location.
+  const lbl = 'font-size:11px;font-weight:600;color:var(--ink-soft)';
   return `<div class="ec-slot-row" data-id="${esc(g.id || '')}" style="border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px">
-    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-      <input placeholder="Slot label (e.g. Help with setup)" class="ec-sg-label" value="${esc(g.label || '')}" style="flex:1">
-      <button type="button" class="btn btn-ghost" style="padding:6px 10px" title="Remove slot" onclick="this.closest('.ec-slot-row').remove()">✕</button>
+    <div style="margin-bottom:8px">
+      <label style="${lbl}">Slot label</label>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:2px">
+        <input placeholder="e.g. Help with setup" class="ec-sg-label" value="${esc(g.label || '')}" style="flex:1">
+        <button type="button" class="btn btn-ghost" style="padding:6px 10px" title="Remove slot" onclick="this.closest('.ec-slot-row').remove()">✕</button>
+      </div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px">
-      <label style="font-size:11px;font-weight:600;color:var(--ink-soft)">Start time<input type="time" class="ec-sg-start" value="${to24h(g.startTime)}" style="display:block;width:100%;margin-top:2px"></label>
-      <label style="font-size:11px;font-weight:600;color:var(--ink-soft)">End time<input type="time" class="ec-sg-end" value="${to24h(g.endTime)}" style="display:block;width:100%;margin-top:2px"></label>
-      <label style="font-size:11px;font-weight:600;color:var(--ink-soft)">Spots<input type="number" min="1" class="ec-sg-cap" value="${g.capacity || 2}" style="display:block;width:100%;margin-top:2px"></label>
+      <label style="${lbl}">Start time<input type="time" class="ec-sg-start" value="${to24h(g.startTime)}" style="display:block;width:100%;margin-top:2px"></label>
+      <label style="${lbl}">End time<input type="time" class="ec-sg-end" value="${to24h(g.endTime)}" style="display:block;width:100%;margin-top:2px"></label>
+      <label style="${lbl}">Spots<input type="number" min="1" class="ec-sg-cap" value="${g.capacity || 2}" style="display:block;width:100%;margin-top:2px"></label>
     </div>
-    <input placeholder="Location for this slot" class="ec-sg-loc" value="${esc(g.location || '')}" style="display:${multiLoc ? 'block' : 'none'};width:100%">
+    <div class="ec-sg-loc-wrap" style="display:${multiLoc ? 'block' : 'none'}">
+      <label style="${lbl}">Location</label>
+      <input placeholder="e.g. ES Bus Bay" class="ec-sg-loc" value="${esc(g.location || '')}" style="display:block;width:100%;margin-top:2px">
+    </div>
   </div>`;
 }
 
@@ -137,7 +143,7 @@ export function wireComponentConfig(root) {
   });
   const multi = root.querySelector('[data-ec-multiloc]');
   if (multi) multi.onchange = () => {
-    root.querySelectorAll('.ec-sg-loc').forEach(el => { el.style.display = multi.checked ? 'block' : 'none'; });
+    root.querySelectorAll('.ec-sg-loc-wrap').forEach(el => { el.style.display = multi.checked ? 'block' : 'none'; });
   };
   const addSlot = root.querySelector('[data-ec-addslot]');
   if (addSlot) addSlot.onclick = () => {
