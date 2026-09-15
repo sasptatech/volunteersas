@@ -7,7 +7,15 @@
 // The create form (admin.html) and the edit form (event.html) share ONE config
 // UI from here, so they never drift apart.
 import { esc } from "./common.js";
-import { halfHourOptions, normalizeTime } from "./cafe-dates.js";
+import { halfHourOptions, normalizeTime, timeToMinutes } from "./cafe-dates.js";
+
+// Convert a stored 12-hour time ("9:00 AM") to the 24-hour "HH:MM" that a native
+// <input type="time"> expects. Empty stays empty.
+function to24h(str) {
+  if (!str || !str.trim()) return '';
+  const mins = timeToMinutes(str);
+  return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+}
 import { db, storage, collection, query, where, getDocs, deleteDoc, doc, storageRef, deleteObject } from "./firebase-init.js";
 
 // Delete an event and everything attached to it: all sign-ups (RSVP / slot /
@@ -90,13 +98,19 @@ export function componentConfigHtml(ev) {
 
 function slotRowHtml(g, multiLoc) {
   g = g || {};
-  return `<div class="ec-slot-row" data-id="${esc(g.id || '')}" style="display:grid;grid-template-columns:2fr 1fr 1fr .8fr auto;gap:6px;margin-bottom:6px;align-items:center">
-    <input placeholder="Label (e.g. Decorating)" class="ec-sg-label" value="${esc(g.label || '')}">
-    <input list="ecHalfHours" placeholder="Start (e.g. 9:00 AM)" class="ec-sg-start" value="${esc(g.startTime || '')}">
-    <input list="ecHalfHours" placeholder="End (e.g. 10:00 AM)" class="ec-sg-end" value="${esc(g.endTime || '')}">
-    <input type="number" min="1" class="ec-sg-cap" value="${g.capacity || 2}">
-    <button type="button" class="btn btn-ghost" style="padding:6px 10px" onclick="this.closest('.ec-slot-row').remove()">✕</button>
-    <input placeholder="Location for this slot" class="ec-sg-loc" value="${esc(g.location || '')}" style="grid-column:1 / -1;display:${multiLoc ? 'block' : 'none'}">
+  // Each slot is its own bordered card (clear separation), laid out over three
+  // rows so it fits the width: label + remove; start/end/spots; location.
+  return `<div class="ec-slot-row" data-id="${esc(g.id || '')}" style="border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px">
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+      <input placeholder="Slot label (e.g. Help with setup)" class="ec-sg-label" value="${esc(g.label || '')}" style="flex:1">
+      <button type="button" class="btn btn-ghost" style="padding:6px 10px" title="Remove slot" onclick="this.closest('.ec-slot-row').remove()">✕</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px">
+      <label style="font-size:11px;font-weight:600;color:var(--ink-soft)">Start time<input type="time" class="ec-sg-start" value="${to24h(g.startTime)}" style="display:block;width:100%;margin-top:2px"></label>
+      <label style="font-size:11px;font-weight:600;color:var(--ink-soft)">End time<input type="time" class="ec-sg-end" value="${to24h(g.endTime)}" style="display:block;width:100%;margin-top:2px"></label>
+      <label style="font-size:11px;font-weight:600;color:var(--ink-soft)">Spots<input type="number" min="1" class="ec-sg-cap" value="${g.capacity || 2}" style="display:block;width:100%;margin-top:2px"></label>
+    </div>
+    <input placeholder="Location for this slot" class="ec-sg-loc" value="${esc(g.location || '')}" style="display:${multiLoc ? 'block' : 'none'};width:100%">
   </div>`;
 }
 
