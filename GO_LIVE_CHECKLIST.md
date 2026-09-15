@@ -29,18 +29,13 @@ nothing is blocked. But metrics stay meaningless until this is fixed.
 
 ## 🟠 Before the wider public launch
 
-### 2. Turn on App Check enforcement
-**Why:** This is what actually blocks bots. It is deliberately OFF right now, because
-enforcing while legitimate traffic is unverified would lock out real users.
-
-- Check the dashboard: Firebase console → **App Check** → **APIs** → **Cloud Firestore**
-- Wait for **~24–48h of normal real use**, then confirm **Verified is ~95%+**
-  - Last reading (2026-07-23): 66% verified — but that was polluted by setup noise
-    and automated testing, so it needs a clean window before it means anything.
-- Then enforce **one service at a time**, watching a day between each:
-  1. Cloud Firestore
-  2. Authentication
-  3. Cloud Storage
+### 2. App Check enforcement — ✅ DONE (2026-09-15)
+Dashboard showed **100% verified** (4.9K/4.9K, zero unverified) over 7 days, so
+enforcement was turned on for **all three** — Cloud Firestore, Authentication,
+Cloud Storage. Bots hitting the backend directly (no valid token) are now blocked;
+real app traffic is unaffected. Reversible per-service if ever needed.
+(Note: Claude's automated test browser now gets blocked by design — it can't get a
+valid reCAPTCHA token — so live testing of the app is on the user's real browser.)
 
 ### 3. Get the PTA domain and switch email over to it
 **Why:** Email currently sends from a **Gmail** address via Brevo. Brevo flags this
