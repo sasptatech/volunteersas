@@ -5,7 +5,7 @@
 - `event.html` — event detail: RSVP, attendee bubbles, attachments, admin-posted photos, chat, admin tools (edit, add co-admin, email placeholder)
 - `cafe.html` — PTA Cafe: week/month view, shift signups, Store Admin controls (open/close days, extra slots, menu PDF), cafe chat
 - `schedule.html` — "My Schedule": combined list of your event RSVPs + Cafe shifts
-- `profile.html` — edit name, email, phone, divisions, status, anonymous toggle, email opt-out, profile photo
+- `profile.html` — edit name, email, phone, connection to SAS (child grades + Staff/Alumni), status, anonymous toggle, email opt-out, profile photo
 - `admin.html` — Events / Hours / Members / Audit log tabs, gated by role
 
 ## Two things that must be set up before uploads/photos work

@@ -20,10 +20,11 @@ import {
 } from "./js/auth.js";
 import { toast, showOverlay, closeOverlay, bubbleRowHtml, esc, renderHeader } from "./js/common.js";
 import { db, collection, onSnapshot, query, orderBy } from "./js/firebase-init.js";
+import { GRADES, classOfForGrade } from "./js/grades.js";
 
 const root = document.getElementById('root');
 let joinStep = 1;
-let joinDraft = { displayName:'', phone:'', divisions:[], anonymous:false, status:'', agreed:false };
+let joinDraft = { displayName:'', phone:'', grades:[], staff:false, alumni:false, anonymous:false, status:'', agreed:false };
 let authMode = 'signup';
 let events = [];
 // For the attendee bubbles on each feed card.
@@ -80,8 +81,13 @@ function renderJoinStep() {
     body = `
       <div class="form-row"><label>Display name</label><input id="jName" value="${esc(d.displayName)}" placeholder="How others will see you"></div>
       <div class="form-row"><label>Phone number (optional, WhatsApp number)</label><input id="jPhone" value="${esc(d.phone)}" placeholder="+65 9123 4567"></div>
-      <div class="form-row"><label>Divisions that apply to you</label>
-        <div class="role-grid">${ECOSYSTEMS.map(e=>`<button type="button" class="role-opt ${d.divisions.includes(e.id)?'active':''}" data-div="${e.id}">${e.icon} ${e.name}</button>`).join('')}</div>
+      <div class="form-row"><label>Your connection to SAS <span style="font-weight:400;color:var(--ink-soft)">(pick all that apply — at least one)</span></label>
+        <div style="font-size:12.5px;color:var(--ink-soft);margin:2px 0 6px">Parents: select your child's / children's <b>current</b> grade.</div>
+        <div class="role-grid">${GRADES.map(g=>`<button type="button" class="role-opt ${d.grades.includes(g.id)?'active':''}" data-grade="${g.id}">${g.label}</button>`).join('')}</div>
+        <div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:12px">
+          <label style="display:flex;align-items:center;gap:8px;font-weight:600"><input type="checkbox" id="jStaff" style="width:auto" ${d.staff?'checked':''}> SAS Staff</label>
+          <label style="display:flex;align-items:center;gap:8px;font-weight:600"><input type="checkbox" id="jAlumni" style="width:auto" ${d.alumni?'checked':''}> SAS Alumni</label>
+        </div>
       </div>
       <div class="form-row"><label style="display:flex;align-items:center;gap:8px;font-weight:600"><input type="checkbox" id="jAnon" style="width:auto" ${d.anonymous?'checked':''}> Keep my details anonymous to other volunteers</label></div>
       <button class="btn btn-primary" style="width:100%" id="joinNext">Continue</button>
@@ -106,22 +112,25 @@ function renderJoinStep() {
   </div></div>`;
 
   if (joinStep === 1) {
-    document.querySelectorAll('.role-opt').forEach(b => b.onclick = () => {
-      const id = b.dataset.div;
-      const i = d.divisions.indexOf(id);
-      if (i >= 0) d.divisions.splice(i, 1); else d.divisions.push(id);
+    document.querySelectorAll('.role-opt[data-grade]').forEach(b => b.onclick = () => {
+      const id = b.dataset.grade;
+      const i = d.grades.indexOf(id);
+      if (i >= 0) d.grades.splice(i, 1); else d.grades.push(id);
       b.classList.toggle('active');
     });
     document.getElementById('joinNext').onclick = () => {
       d.displayName = document.getElementById('jName').value.trim();
       d.phone = document.getElementById('jPhone').value.trim();
+      d.staff = document.getElementById('jStaff').checked;
+      d.alumni = document.getElementById('jAlumni').checked;
       d.anonymous = document.getElementById('jAnon').checked;
       if (!d.displayName) { toast('Please enter a display name.'); return; }
+      if (!d.grades.length && !d.staff && !d.alumni) { toast('Please pick at least one: a grade, Staff, or Alumni.'); return; }
       joinStep = 2; renderJoinStep();
     };
     document.getElementById('joinCancelBtn').onclick = async () => {
       await signOutUser();
-      joinStep = 1; joinDraft = { displayName:'', phone:'', divisions:[], anonymous:false, status:'', agreed:false };
+      joinStep = 1; joinDraft = { displayName:'', phone:'', grades:[], staff:false, alumni:false, anonymous:false, status:'', agreed:false };
       renderAuthGate();
     };
   } else {
@@ -131,7 +140,12 @@ function renderJoinStep() {
       d.agreed = document.getElementById('jAgree').checked;
       if (!d.agreed) { document.getElementById('joinErr').innerHTML = `<div class="err-text">Please agree to the terms to continue.</div>`; return; }
       try {
-        await completeProfile(d);
+        const classOf = [...new Set(d.grades.map(id => classOfForGrade(id)).filter(Boolean))];
+        await completeProfile({
+          displayName: d.displayName, phone: d.phone,
+          classOf, staff: d.staff, alumni: d.alumni,
+          anonymous: d.anonymous, status: d.status,
+        });
         toast('Welcome to VolunteerSAS!');
         renderApp(getProfile());
       } catch (e) { toast('Could not save profile: ' + e.message); }

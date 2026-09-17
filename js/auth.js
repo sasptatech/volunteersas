@@ -81,7 +81,8 @@ export function watchAuth(onSignedIn, onSignedOut) {
     const snap = await getDoc(doc(db, "users", user.uid));
     const DEFAULTS = {
       displayName: user.displayName || 'Volunteer', email: user.email || '', phone: '',
-      divisions: [], anonymous: false, status: '', photoURL: '', emailOptOut: false,
+      classOf: [], staff: false, alumni: false, membership: 'current',
+      anonymous: false, status: '', photoURL: '', emailOptOut: false,
       isAdmin: false, isStoreAdmin: false, isSuperadmin: false,
     };
     if (snap.exists() && snap.data().displayName) {
@@ -117,14 +118,17 @@ export async function signOutUser() {
 }
 
 // Creates the Firestore profile doc after auth succeeds (join flow, step 2).
-export async function completeProfile({ displayName, phone, divisions, anonymous, status }) {
+export async function completeProfile({ displayName, phone, classOf, staff, alumni, anonymous, status }) {
   const user = auth.currentUser;
   if (!user) throw new Error("Not signed in");
   const profile = {
     displayName: displayName || user.displayName || "Volunteer",
     email: user.email || "",
     phone: phone || "",
-    divisions: divisions || [],
+    classOf: classOf || [],
+    staff: !!staff,
+    alumni: !!alumni,
+    membership: 'current',
     anonymous: !!anonymous,
     status: status || "",
     photoURL: "",

@@ -344,13 +344,14 @@ function renderMembersTab() {
     </tr></thead>
     <tbody>${all.map(u => `<tr>
         <td>${esc(u.anonymous ? 'Anonymous' : u.displayName)}</td><td>${esc(u.email)}</td><td>${esc(u.phone || '')}</td>
-        <td>${u.isSuperadmin ? '⭐ Superadmin 🛡️ Admin ☕ Store Admin' : `${u.isAdmin ? '🛡️ Admin ' : ''}${u.isStoreAdmin ? '☕ Store Admin' : ''}`}</td>
+        <td>${u.isSuperadmin ? '⭐ Superadmin 🛡️ Admin ☕ Store Admin' : `${u.isAdmin ? '🛡️ Admin ' : ''}${u.isStoreAdmin ? '☕ Store Admin' : ''}`}${u.membership === 'past' ? ' <span style="font-size:10.5px;font-weight:700;color:#8a6d00;background:#FDECC8;padding:2px 6px;border-radius:6px;white-space:nowrap">No longer in school</span>' : ''}</td>
         ${iAmSuperadmin ? `
         <td style="white-space:nowrap">
           ${u.uid !== getProfile().uid && !u.isSuperadmin ? `
             <button class="small-link" onclick="window.__toggleFlag('${u.uid}','isAdmin',${!u.isAdmin})">${u.isAdmin ? 'Revoke Admin' : 'Make Admin'}</button>
             <button class="small-link" onclick="window.__toggleFlag('${u.uid}','isStoreAdmin',${!u.isStoreAdmin})">${u.isStoreAdmin ? 'Revoke Store Admin' : 'Make Store Admin'}</button>
-          ` : '<span style="font-size:11.5px;color:var(--ink-soft)">—</span>'}
+          ` : ''}
+          <button class="small-link" onclick="window.__setMembership('${u.uid}','${u.membership === 'past' ? 'current' : 'past'}')">${u.membership === 'past' ? 'Mark current parent' : 'Mark left school'}</button>
         </td>
         <td>
           ${u.uid !== getProfile().uid ? `<button class="small-link" style="color:var(--red)" onclick="window.__removeMember('${u.uid}')">Delete from directory</button>` : '<span style="font-size:11.5px;color:var(--ink-soft)">You</span>'}
@@ -527,6 +528,18 @@ function wireTabHandlers() {
       // Mirror the role flag to the public profile (used for admin discovery).
       await setDoc(doc(db, 'publicProfiles', uid), { [field]: value }, { merge: true }).catch(() => {});
       await logAudit(`${value ? 'Granted' : 'Removed'} ${field}`, uid);
+      toast('Updated.');
+    } catch (e) { toast('Could not update: ' + e.message); }
+  };
+
+  window.__setMembership = async (uid, value) => {
+    if (!isSuperadmin()) { toast('Only a Superadmin can do this.'); return; }
+    const label = value === 'past' ? 'No longer in school' : 'Current parent';
+    if (!confirm(`Mark this member as "${label}"?`)) return;
+    try {
+      // Membership is a private, admin-only field — deliberately NOT mirrored to publicProfiles.
+      await updateDoc(doc(db, 'users', uid), { membership: value });
+      await logAudit(`Set membership: ${label}`, uid);
       toast('Updated.');
     } catch (e) { toast('Could not update: ' + e.message); }
   };

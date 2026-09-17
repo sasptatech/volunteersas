@@ -59,9 +59,15 @@ checking with the user first:
 
 ## Data model (Firestore collections)
 - `users/{uid}` — profile: displayName, email, phone (optional, WhatsApp),
-  divisions (array of lowercase ids: `le`/`ue`/`ms`/`hs`), anonymous (bool),
+  `classOf` (array of graduation years, e.g. `[2035]` — a parent picks their
+  child's CURRENT grade at sign-up and we store the derived, never-stale grad
+  year; see `js/grades.js`), `staff` (bool), `alumni` (bool),
+  `membership`: `current` | `past` (admin-only, "no longer in school" — set from
+  Admin → Members, never mirrored to publicProfiles), anonymous (bool),
   status (free text), photoURL, emailOptOut, isAdmin, isStoreAdmin,
-  isSuperadmin
+  isSuperadmin. (Superseded field: `divisions` — old sign-up collected LE/UE/MS/HS
+  directly; now derived from `classOf` via `divisionsForClassOf()`. Event
+  `divisions` below is a separate, unrelated field.)
 - `events/{id}` — title, date, time, location, mappedinLocationId (optional),
   description (HTML from the RTE), divisions (array, lowercase ids),
   adminUids (array), attachments (array of `{name,url}`), photos (array of
@@ -102,8 +108,9 @@ checking with the user first:
 
 ## Pages
 - `index.html` — Discover: auth gate, join flow (display name, phone,
-  divisions, anonymous toggle, status, T&C+Community Norms checkbox), event
-  feed with division filter pills, featured Cafe banner
+  "connection to SAS" = child grade picker + Staff/Alumni tags, anonymous
+  toggle, status, T&C+Community Norms checkbox), event feed with division
+  filter pills, featured Cafe banner
 - `event.html` — event detail: type-aware participation section (RSVP /
   save-the-date notice / volunteer slots / item sign-up), attendee bubbles,
   attachments, photos, RTE-edited description, chat, Mappedin location link,
