@@ -52,7 +52,7 @@ function renderAuthGate() {
     <div class="form-row"><label>Password</label><input id="authPassword" type="password" placeholder="${authMode==='signup'?'Create a password (6+ characters)':'Your password'}"></div>
     <div id="authErr"></div>
     <button class="btn btn-primary" style="width:100%" id="authSubmit">${authMode==='signup'?'Create account':'Sign in'}</button>
-    ${authMode==='signin'?`<div style="text-align:center;margin-top:10px"><button class="small-link" id="forgotPass">Forgot password?</button></div>`:''}
+    <div style="text-align:center;margin-top:10px"><button class="small-link" id="forgotPass">Forgot password?</button></div>
     <div style="text-align:center;margin-top:14px"><button class="small-link" id="toggleAuthMode">${authMode==='signup'?'Already have an account? Sign in':'New here? Create an account'}</button></div>
   </div></div>`;
 
@@ -69,7 +69,11 @@ function renderAuthGate() {
       if (authMode === 'signup') await emailSignUp(email, pass);
       else await emailSignIn(email, pass);
     } catch (e) {
-      if (e.code === 'auth/email-already-in-use') { authMode = 'signin'; renderAuthGate(); toast('Account exists — sign in instead.'); }
+      if (e.code === 'auth/email-already-in-use') {
+        authMode = 'signin'; renderAuthGate();
+        document.getElementById('authEmail').value = email;
+        document.getElementById('authErr').innerHTML = `<div class="err-text">An account already exists for that email. Enter your password to sign in, or tap “Forgot password?” below to reset it.</div>`;
+      }
       else errEl.innerHTML = `<div class="err-text">${esc(authErrorMessage(e))}</div>`;
     }
   };
