@@ -69,6 +69,7 @@ const NAV_ITEMS = [
   ['index.html', '⭐ Discover'],
   ['cafe.html', '☕ Cafe Volunteer'],
   ['menu.html', '🍽️ PTA Cafe'],
+  ['community.html', '💬 Community'],
   ['schedule.html', '📅 My Schedule'],
 ];
 
