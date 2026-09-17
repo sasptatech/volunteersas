@@ -134,6 +134,8 @@ export function authErrorMessage(e) {
       return "This account has been disabled. Please contact the PTA.";
     case 'auth/email-already-in-use':
       return "An account already exists for that email — try signing in instead.";
+    case 'auth/account-exists-with-different-credential':
+      return "This email is already registered with a different sign-in method. If you first signed up with Google, use “Continue with Google”; otherwise sign in with your email and password (or reset it below).";
     case 'auth/weak-password':
       return "Please choose a password with at least 6 characters.";
     case 'auth/too-many-requests':

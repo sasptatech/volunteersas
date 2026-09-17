@@ -72,7 +72,7 @@ function renderAuthGate() {
       if (e.code === 'auth/email-already-in-use') {
         authMode = 'signin'; renderAuthGate();
         document.getElementById('authEmail').value = email;
-        document.getElementById('authErr').innerHTML = `<div class="err-text">An account already exists for that email. Enter your password to sign in, or tap “Forgot password?” below to reset it.</div>`;
+        document.getElementById('authErr').innerHTML = `<div class="err-text">An account already exists for that email. If you signed up with Google, use “Continue with Google” above. Otherwise enter your password, or tap “Forgot password?” below to set or reset one.</div>`;
       }
       else errEl.innerHTML = `<div class="err-text">${esc(authErrorMessage(e))}</div>`;
     }
