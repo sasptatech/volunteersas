@@ -1,7 +1,7 @@
 // auth.js — shared authentication + profile logic used by every page.
 import {
   auth, db, GoogleAuthProvider, onAuthStateChanged, createUserWithEmailAndPassword,
-  signInWithEmailAndPassword, signInWithPopup, fbSignOut,
+  signInWithEmailAndPassword, signInWithPopup, fbSignOut, sendPasswordResetEmail,
   doc, getDoc, setDoc, serverTimestamp
 } from "./firebase-init.js";
 
@@ -115,6 +115,37 @@ export async function emailSignIn(email, password) {
 }
 export async function signOutUser() {
   return fbSignOut(auth);
+}
+export async function resetPassword(email) {
+  return sendPasswordResetEmail(auth, email);
+}
+
+// Turns Firebase auth error codes into plain, friendly messages for members.
+export function authErrorMessage(e) {
+  const code = (e && e.code) || '';
+  switch (code) {
+    case 'auth/invalid-credential':
+    case 'auth/wrong-password':
+    case 'auth/user-not-found':
+      return "That email or password doesn't match. Check them and try again, or use “Forgot password?” below.";
+    case 'auth/invalid-email':
+      return "That doesn't look like a valid email address.";
+    case 'auth/user-disabled':
+      return "This account has been disabled. Please contact the PTA.";
+    case 'auth/email-already-in-use':
+      return "An account already exists for that email — try signing in instead.";
+    case 'auth/weak-password':
+      return "Please choose a password with at least 6 characters.";
+    case 'auth/too-many-requests':
+      return "Too many attempts. Please wait a few minutes and try again, or reset your password.";
+    case 'auth/network-request-failed':
+      return "Network problem — check your connection and try again.";
+    case 'auth/popup-closed-by-user':
+    case 'auth/cancelled-popup-request':
+      return "Sign-in was cancelled.";
+    default:
+      return (e && e.message) ? e.message.replace(/^Firebase:\s*/, '') : "Something went wrong. Please try again.";
+  }
 }
 
 // Creates the Firestore profile doc after auth succeeds (join flow, step 2).

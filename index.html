@@ -16,7 +16,8 @@
 <script type="module">
 import {
   watchAuth, googleSignIn, emailSignUp, emailSignIn, completeProfile,
-  getProfile, ECOSYSTEMS, TERMS_TEXT, COMMUNITY_NORMS_SUMMARY, signOutUser
+  getProfile, ECOSYSTEMS, TERMS_TEXT, COMMUNITY_NORMS_SUMMARY, signOutUser,
+  resetPassword, authErrorMessage
 } from "./js/auth.js";
 import { toast, showOverlay, closeOverlay, bubbleRowHtml, esc, renderHeader } from "./js/common.js";
 import { db, collection, onSnapshot, query, orderBy } from "./js/firebase-init.js";
@@ -51,11 +52,12 @@ function renderAuthGate() {
     <div class="form-row"><label>Password</label><input id="authPassword" type="password" placeholder="${authMode==='signup'?'Create a password (6+ characters)':'Your password'}"></div>
     <div id="authErr"></div>
     <button class="btn btn-primary" style="width:100%" id="authSubmit">${authMode==='signup'?'Create account':'Sign in'}</button>
+    ${authMode==='signin'?`<div style="text-align:center;margin-top:10px"><button class="small-link" id="forgotPass">Forgot password?</button></div>`:''}
     <div style="text-align:center;margin-top:14px"><button class="small-link" id="toggleAuthMode">${authMode==='signup'?'Already have an account? Sign in':'New here? Create an account'}</button></div>
   </div></div>`;
 
   document.getElementById('googleBtn').onclick = async () => {
-    try { await googleSignIn(); } catch (e) { toast('Google sign-in failed: ' + e.message); }
+    try { await googleSignIn(); } catch (e) { toast('Google sign-in failed: ' + authErrorMessage(e)); }
   };
   document.getElementById('authSubmit').onclick = async () => {
     const email = document.getElementById('authEmail').value.trim();
@@ -68,7 +70,25 @@ function renderAuthGate() {
       else await emailSignIn(email, pass);
     } catch (e) {
       if (e.code === 'auth/email-already-in-use') { authMode = 'signin'; renderAuthGate(); toast('Account exists — sign in instead.'); }
-      else errEl.innerHTML = `<div class="err-text">${esc(e.message)}</div>`;
+      else errEl.innerHTML = `<div class="err-text">${esc(authErrorMessage(e))}</div>`;
+    }
+  };
+  const forgotBtn = document.getElementById('forgotPass');
+  if (forgotBtn) forgotBtn.onclick = async () => {
+    const email = document.getElementById('authEmail').value.trim();
+    const errEl = document.getElementById('authErr');
+    errEl.innerHTML = '';
+    if (!email) { errEl.innerHTML = `<div class="err-text">Enter your email above first, then tap “Forgot password?”.</div>`; return; }
+    try {
+      await resetPassword(email);
+      errEl.innerHTML = `<div style="color:var(--green,#0E8A6D);font-size:12.5px;margin:4px 0">If an account exists for ${esc(email)}, a password-reset link is on its way. Check your inbox (and spam).</div>`;
+    } catch (e) {
+      // Don't reveal whether an address is registered — treat "no user" as success.
+      if (e.code === 'auth/user-not-found') {
+        errEl.innerHTML = `<div style="color:var(--green,#0E8A6D);font-size:12.5px;margin:4px 0">If an account exists for ${esc(email)}, a password-reset link is on its way. Check your inbox (and spam).</div>`;
+      } else {
+        errEl.innerHTML = `<div class="err-text">${esc(authErrorMessage(e))}</div>`;
+      }
     }
   };
   document.getElementById('toggleAuthMode').onclick = () => { authMode = authMode === 'signup' ? 'signin' : 'signup'; renderAuthGate(); };

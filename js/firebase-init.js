@@ -5,7 +5,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/fireba
 import {
   getAuth, GoogleAuthProvider, onAuthStateChanged,
   createUserWithEmailAndPassword, signInWithEmailAndPassword,
-  signInWithPopup, signOut as fbSignOut
+  signInWithPopup, signOut as fbSignOut, sendPasswordResetEmail
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   getFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc,
@@ -53,7 +53,7 @@ export const storage = getStorage(app);
 
 export {
   GoogleAuthProvider, onAuthStateChanged, createUserWithEmailAndPassword,
-  signInWithEmailAndPassword, signInWithPopup, fbSignOut,
+  signInWithEmailAndPassword, signInWithPopup, fbSignOut, sendPasswordResetEmail,
   collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc,
   onSnapshot, query, where, orderBy, limit, serverTimestamp,
   arrayUnion, arrayRemove, increment, writeBatch,
